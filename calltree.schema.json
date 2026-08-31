@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "calltree.schema.json",
+  "title": "Static Call Tree Extraction",
+  "description": "libclang + compile_commands.json 으로 추출한 정적 콜트리. 사실만 담으며 오염 판정은 포함하지 않는다.",
+  "type": "object",
+  "required": ["schema_version", "meta", "nodes", "state"],
+  "additionalProperties": false,
+
+  "properties": {
+    "schema_version": { "const": 1 },
+
+    "meta": {
+      "type": "object",
+      "required": ["entry_point", "compile_commands", "clang_version", "generated_at", "tu_count"],
+      "additionalProperties": false,
+      "properties": {
+        "entry_point": { "$ref": "#/$defs/usr" },
+        "compile_commands": { "type": "string", "minLength": 1 },
+        "clang_version": { "type": "string", "minLength": 1 },
+        "generated_at": { "type": "string", "format": "date-time" },
+        "tu_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "nodes": {
+      "type": "object",
+      "description": "USR -> 함수 노드",
+      "propertyNames": { "$ref": "#/$defs/usr" },
+      "additionalProperties": { "$ref": "#/$defs/node" }
+    },
+
+    "state": {
+      "type": "object",
+      "description": "USR -> 전역 또는 함수 내 static 변수",
+      "propertyNames": { "$ref": "#/$defs/usr" },
+      "additionalProperties": { "$ref": "#/$defs/stateVar" }
+    }
+  },
+
+  "$defs": {
+
+    "usr": {
+      "type": "string",
+      "description": "clang Unified Symbol Resolution. cursor.get_usr() 결과를 가공 없이 사용한다.",
+      "pattern": "^c:",
+      "minLength": 3
+    },
+
+    "loc": {
+      "type": "object",
+      "required": ["file", "line"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "node": {
+      "type": "object",
+      "required": ["name", "linkage", "kind", "loc"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "linkage": {
+          "enum": ["external", "internal"],
+          "description": "internal = static"
+        },
+        "kind": {
+          "enum": ["definition", "declaration"],
+          "description": "declaration = 어느 TU에서도 정의를 보지 못함. 콜트리 리프로 확정된다."
+        },
+        "loc": { "$ref": "#/$defs/loc" },
+        "return_type": { "type": "string", "minLength": 1 },
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "calls": {
+          "type": "array",
+          "description": "해석된 직접 호출. 같은 콜리를 여러 번 부르면 각각 기록하므로 중복 허용.",
+          "items": {
+            "type": "object",
+            "required": ["callee", "loc"],
+            "additionalProperties": false,
+            "properties": {
+              "callee": { "$ref": "#/$defs/usr" },
+              "loc": { "$ref": "#/$defs/loc" }
+            }
+          }
+        },
+        "state_uses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["target", "access", "loc"],
+            "additionalProperties": false,
+            "properties": {
+              "target": { "$ref": "#/$defs/usr" },
+              "access": {
+                "enum": ["read", "write", "readwrite", "addr"],
+                "description": "addr = 주소만 취함. 정적으로 방향 판정 불가하므로 분석 단계에서 보수적으로 처리한다."
+              },
+              "loc": { "$ref": "#/$defs/loc" }
+            }
+          }
+        },
+        "unresolved_calls": {
+          "type": "array",
+          "description": "비어있지 않으면 이 노드의 콜트리는 불완전하다.",
+          "items": {
+            "type": "object",
+            "required": ["loc", "expr", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "loc": { "$ref": "#/$defs/loc" },
+              "expr": { "type": "string", "minLength": 1 },
+              "reason": { "enum": ["function_pointer", "inline_asm", "unknown"] }
+            }
+          }
+        }
+      },
+
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "definition" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["return_type", "params", "calls", "state_uses", "unresolved_calls"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "declaration" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "description": "본문이 없으므로 호출도 상태 접근도 관측될 수 없다.",
+            "properties": {
+              "calls": { "maxItems": 0 },
+              "state_uses": { "maxItems": 0 },
+              "unresolved_calls": { "maxItems": 0 }
+            }
+          }
+        }
+      ]
+    },
+
+    "stateVar": {
+      "type": "object",
+      "required": ["name", "type", "scope", "linkage", "is_const", "loc"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "scope": {
+          "enum": ["file_global", "function_static"],
+          "description": "함수 내 static은 스코프만 좁을 뿐 숨은 상태라는 성격이 전역과 같다."
+        },
+        "linkage": { "enum": ["external", "internal"] },
+        "is_const": {
+          "type": "boolean",
+          "description": "필수. 없으면 const 룩업 테이블이 오염원으로 잡혀 오염도가 부푼다."
+        },
+        "owner": { "$ref": "#/$defs/usr" },
+        "loc": { "$ref": "#/$defs/loc" }
+      },
+
+      "allOf": [
+        {
+          "if": {
+            "properties": { "scope": { "const": "function_static" } },
+            "required": ["scope"]
+          },
+          "then": {
+            "required": ["owner"],
+            "properties": { "linkage": { "const": "internal" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "scope": { "const": "file_global" } },
+            "required": ["scope"]
+          },
+          "then": {
+            "not": { "required": ["owner"] }
+          }
+        }
+      ]
+    }
+  }
+}
