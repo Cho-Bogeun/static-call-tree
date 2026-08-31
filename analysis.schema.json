@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "analysis.schema.json",
+  "title": "Contamination Analysis",
+  "description": "calltree.json 을 입력으로 받아 오염 판정을 수행한 파생 파일. 같은 USR 키로 조인한다.",
+  "type": "object",
+  "required": ["schema_version", "source", "criteria", "nodes"],
+  "additionalProperties": false,
+
+  "properties": {
+    "schema_version": { "const": 1 },
+
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "입력으로 삼은 calltree 파일 경로"
+    },
+
+    "criteria": {
+      "type": "object",
+      "description": "기준을 바꿔가며 여러 번 돌릴 때 결과를 구분하기 위해 기록한다.",
+      "required": ["exclude_const", "include_function_static", "addr_as"],
+      "additionalProperties": false,
+      "properties": {
+        "exclude_const": { "type": "boolean" },
+        "include_function_static": { "type": "boolean" },
+        "addr_as": { "enum": ["read", "write", "readwrite", "manual"] }
+      }
+    },
+
+    "nodes": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/usr" },
+      "additionalProperties": { "$ref": "#/$defs/verdict" }
+    }
+  },
+
+  "$defs": {
+
+    "usr": {
+      "type": "string",
+      "pattern": "^c:",
+      "minLength": 3
+    },
+
+    "verdict": {
+      "type": "object",
+      "required": [
+        "is_impure",
+        "impurity_reasons",
+        "is_contaminated",
+        "contamination_degree",
+        "is_clean_subtree_root",
+        "scc_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "is_impure": {
+          "type": "boolean",
+          "description": "오염원. 실제 수정 대상."
+        },
+        "impurity_reasons": {
+          "type": "array",
+          "description": "이 노드를 오염원으로 만든 state USR 목록",
+          "items": { "$ref": "#/$defs/usr" },
+          "uniqueItems": true
+        },
+        "is_contaminated": {
+          "type": "boolean",
+          "description": "오염됨. 부수적 노드이며 오염원이 해소되면 함께 풀린다."
+        },
+        "contamination_degree": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "역방향 도달성 기준 조상 수"
+        },
+        "is_clean_subtree_root": {
+          "type": "boolean",
+          "description": "비용 0의 테스트 경계 후보"
+        },
+        "scc_id": {
+          "type": ["string", "null"],
+          "description": "재귀/상호재귀 축약 그룹. 단일 노드면 null."
+        }
+      },
+
+      "allOf": [
+        {
+          "if": {
+            "properties": { "is_impure": { "const": true } },
+            "required": ["is_impure"]
+          },
+          "then": {
+            "properties": { "impurity_reasons": { "minItems": 1 } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "is_impure": { "const": false } },
+            "required": ["is_impure"]
+          },
+          "then": {
+            "description": "오염원이 아니면 사유가 있을 수 없다.",
+            "properties": { "impurity_reasons": { "maxItems": 0 } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "is_clean_subtree_root": { "const": true } },
+            "required": ["is_clean_subtree_root"]
+          },
+          "then": {
+            "description": "깨끗한 서브트리 루트는 스스로 오염원일 수 없다.",
+            "properties": { "is_impure": { "const": false } }
+          }
+        }
+      ]
+    }
+  }
+}
