@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from calltree.compile_db import CompileCommand
-from calltree.libclang_loader import load
+from calltree.libclang_loader import require
 from calltree.merge import merge_node, merge_nodes, merge_state, merge_state_var
 from calltree.model import (
     Access,
@@ -81,7 +81,7 @@ class TUExtractor:
     """TU 하나를 파싱해 `TUResult` 로 만든다."""
 
     def __init__(self, root: str | Path = ".", include_system: bool = False) -> None:
-        self.ci = load()
+        self.ci = require()
         self.root = Path(root).resolve()
         self.include_system = include_system
         self.index = self.ci.Index.create()
@@ -100,9 +100,14 @@ class TUExtractor:
         path: str | Path,
         args: Sequence[str] | None = None,
         directory: str | Path | None = None,
+        unsaved_files: Sequence[tuple[str, str]] | None = None,
     ) -> TUResult:
         self._base = Path(directory).resolve() if directory else self.root
-        tu = self.index.parse(str(path), args=list(args or []))
+        tu = self.index.parse(
+            str(path),
+            args=list(args or []),
+            unsaved_files=list(unsaved_files or []),
+        )
         return self.extract(tu, str(path))
 
     def extract(self, tu: Any, path: str) -> TUResult:

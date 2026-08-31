@@ -6,9 +6,7 @@ from pathlib import Path
 import pytest
 
 from calltree.cli import main
-from conftest import FIXTURE_ROOT, requires_libclang
-
-pytestmark = requires_libclang
+from conftest import FIXTURE_ROOT
 
 
 def run_extract(

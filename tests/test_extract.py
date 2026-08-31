@@ -7,9 +7,7 @@ import pytest
 from calltree.extract import ExtractionResult, TUExtractor, extract
 from calltree.model import FunctionNode
 
-from conftest import FIXTURE_ROOT, make_commands, requires_libclang
-
-pytestmark = requires_libclang
+from conftest import FIXTURE_ROOT, make_commands
 
 
 @pytest.fixture(scope="module")
