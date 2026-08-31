@@ -17,9 +17,13 @@ from pathlib import Path
 from calltree import __version__
 from calltree.compile_db import load_compile_commands
 from calltree.extract import ExtractionResult, extract
-from calltree.libclang_loader import LibclangUnavailable, clang_version, configure
+from calltree.libclang_loader import LibclangUnavailable
 from calltree.model import CallTree, Meta
+from calltree.preflight import diagnose, run as preflight
 from calltree.validation import load_schema, validate
+
+#: libclang 문제로 아무 것도 하지 못하고 멈췄을 때의 종료 코드.
+EXIT_LIBCLANG = 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,6 +74,9 @@ def build_parser() -> argparse.ArgumentParser:
     validate_cmd.add_argument("file", help="calltree.json 경로")
     validate_cmd.add_argument("--schema", help="스키마 파일 경로")
 
+    doctor_cmd = sub.add_parser("doctor", help="libclang 이 쓸 만한 상태인지 점검")
+    doctor_cmd.add_argument("--libclang", help="libclang 공유 라이브러리 경로")
+
     return parser
 
 
@@ -97,12 +104,13 @@ def _resolve_entry(entry: str, result: ExtractionResult) -> str:
 
 
 def _run_extract(args: argparse.Namespace) -> int:
+    # 무엇보다 먼저 점검한다. libclang 이 조금이라도 어긋나면 파일 하나 읽지 않고 멈춘다.
     try:
-        configure(library_file=args.libclang)
-        version = clang_version()
+        report = preflight(library_file=args.libclang)
     except LibclangUnavailable as exc:
         print(str(exc), file=sys.stderr)
-        return 2
+        return EXIT_LIBCLANG
+    version = report.clang_version
 
     commands = load_compile_commands(args.compile_commands)
     if not commands:
@@ -186,10 +194,26 @@ def _run_validate(args: argparse.Namespace) -> int:
     return 1
 
 
+def _run_doctor(args: argparse.Namespace) -> int:
+    try:
+        report = diagnose(library_file=args.libclang)
+    except LibclangUnavailable as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_LIBCLANG
+
+    print(report.summary())
+    if report.ok:
+        return 0
+    print("\n이 상태로는 추출을 시작하지 않는다.", file=sys.stderr)
+    return EXIT_LIBCLANG
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "extract":
         return _run_extract(args)
+    if args.command == "doctor":
+        return _run_doctor(args)
     return _run_validate(args)
 
 

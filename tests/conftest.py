@@ -6,15 +6,23 @@ from pathlib import Path
 import pytest
 
 from calltree.compile_db import CompileCommand
-from calltree.libclang_loader import is_available
+from calltree.libclang_loader import LibclangUnavailable
+from calltree.preflight import run as preflight
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "proj"
 SOURCES = ("src/cfg.c", "src/proc.c", "src/aux.c")
 
-requires_libclang = pytest.mark.skipif(
-    not is_available(),
-    reason="libclang 을 불러올 수 없다 (pip install libclang)",
-)
+
+def pytest_configure(config: pytest.Config) -> None:
+    """libclang 이 어긋나 있으면 테스트를 하나도 돌리지 않는다.
+
+    건너뛰기(skip)로 두면 CI 는 초록불인데 파싱 테스트는 한 개도 안 돈 상태가 된다.
+    그게 제일 위험하므로 수집 단계에서 통째로 실패시킨다.
+    """
+    try:
+        preflight()
+    except LibclangUnavailable as exc:
+        raise pytest.UsageError(f"\n{exc}") from exc
 
 
 def make_commands(root: Path = FIXTURE_ROOT) -> list[CompileCommand]:

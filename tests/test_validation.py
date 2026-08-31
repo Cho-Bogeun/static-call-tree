@@ -9,7 +9,7 @@ import pytest
 from calltree.extract import extract
 from calltree.model import CallTree, Meta
 from calltree.validation import find_schema, load_schema, validate
-from conftest import FIXTURE_ROOT, make_commands, requires_libclang
+from conftest import FIXTURE_ROOT, make_commands
 
 jsonschema = pytest.importorskip("jsonschema")
 
@@ -36,12 +36,10 @@ def extracted() -> dict:
     return tree.to_dict()
 
 
-@requires_libclang
 def test_extraction_output_validates(extracted: dict):
     assert validate(extracted) == []
 
 
-@requires_libclang
 def test_validator_rejects_unknown_field(extracted: dict):
     data = copy.deepcopy(extracted)
     data["nodes"]["c:@F@process_frame"]["contamination_degree"] = 7
@@ -50,7 +48,6 @@ def test_validator_rejects_unknown_field(extracted: dict):
     assert any("contamination_degree" in error for error in errors)
 
 
-@requires_libclang
 def test_validator_rejects_bad_access_value(extracted: dict):
     data = copy.deepcopy(extracted)
     data["nodes"]["c:@F@process_frame"]["state_uses"][0]["access"] = "maybe"
