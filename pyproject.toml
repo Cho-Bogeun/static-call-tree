@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "calltree"
+version = "0.1.0"
+description = "libclang + compile_commands.json 으로 레거시 C 코드베이스의 정적 콜트리를 추출한다"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# 시스템에 설치된 libclang 을 쓰고 싶으면 이 의존성을 빼고
+# CALLTREE_LIBCLANG_LIBRARY 로 .so 경로를 지정하면 된다.
+dependencies = ["libclang>=16"]
+
+[project.optional-dependencies]
+validate = ["jsonschema>=4"]
+dev = ["jsonschema>=4", "pytest>=7"]
+
+[project.scripts]
+calltree = "calltree.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
