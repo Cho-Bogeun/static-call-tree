@@ -92,6 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="주소만 취한 접근을 무엇으로 볼지 (기본: readwrite)",
     )
     analyze_cmd.add_argument(
+        "--const-read",
+        action="store_true",
+        help="읽기 전용 접근을 상수 취급해 오염원 근거에서 뺀다 (기본: 센다)",
+    )
+    analyze_cmd.add_argument(
         "--validate", action="store_true", help="출력을 스키마로 검증한다"
     )
     analyze_cmd.add_argument("-q", "--quiet", action="store_true", help="요약 숨김")
@@ -218,6 +223,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
         exclude_const=not args.include_const,
         include_function_static=not args.no_function_static,
         addr_as=args.addr_as,
+        const_read=args.const_read,
     )
 
     try:

@@ -8,7 +8,7 @@
   "additionalProperties": false,
 
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
 
     "source": {
       "type": "string",
@@ -19,12 +19,21 @@
     "criteria": {
       "type": "object",
       "description": "기준을 바꿔가며 여러 번 돌릴 때 결과를 구분하기 위해 기록한다.",
-      "required": ["exclude_const", "include_function_static", "addr_as"],
+      "required": [
+        "exclude_const",
+        "include_function_static",
+        "addr_as",
+        "const_read"
+      ],
       "additionalProperties": false,
       "properties": {
         "exclude_const": { "type": "boolean" },
         "include_function_static": { "type": "boolean" },
-        "addr_as": { "enum": ["read", "write", "readwrite", "manual"] }
+        "addr_as": { "enum": ["read", "write", "readwrite", "manual"] },
+        "const_read": {
+          "type": "boolean",
+          "description": "읽기 전용 접근을 상수 취급해 오염원 근거에서 뺀다. addr_as 가 방향을 정한 뒤에 적용되므로, 이 값이 false 면 addr_as 의 read/write/readwrite 가 같은 결과를 낸다."
+        }
       }
     },
 

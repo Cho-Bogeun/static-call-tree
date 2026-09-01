@@ -14,6 +14,7 @@ import pytest
 from calltree.analysis import EntryNotFound, analyze, reachable_from
 from calltree.extract import extract
 from calltree.model import (
+    ANALYSIS_SCHEMA_VERSION,
     Analysis,
     Call,
     CallTree,
@@ -202,12 +203,65 @@ def test_unknown_state_target_counts_conservatively():
 
 
 @pytest.mark.parametrize("addr_as", ["read", "write", "readwrite", "manual"])
-def test_addr_access_counts_under_every_criterion(addr_as: str):
-    """§4 의 정의에 방향을 거르는 기준은 없다. addr_as 는 판정을 바꾸지 않는다."""
-    tree = make_tree(
-        {"main": []}, uses={"main": [("g", "addr")]}, state={"g": {}}
-    )
+def test_addr_as_alone_does_not_change_the_verdict(addr_as: str):
+    """const_read 가 꺼져 있으면 방향을 보지 않으므로 네 값이 같은 결과를 낸다."""
+    tree = make_tree({"main": []}, uses={"main": [("g", "addr")]}, state={"g": {}})
     assert analyze(tree, Criteria(addr_as=addr_as)).analysis.nodes[fn("main")].is_impure
+
+
+def test_reads_count_until_const_read_is_on():
+    tree = make_tree({"main": []}, uses={"main": [("g", "read")]}, state={"g": {}})
+
+    assert analyze(tree).analysis.nodes[fn("main")].is_impure
+    assert not analyze(tree, Criteria(const_read=True)).analysis.nodes[
+        fn("main")
+    ].is_impure
+
+
+def test_const_read_never_drops_a_write():
+    tree = make_tree(
+        {"main": []},
+        uses={"main": [("g", "write"), ("g_rw", "readwrite")]},
+        state={"g": {}, "g_rw": {}},
+    )
+    verdict = analyze(tree, Criteria(const_read=True)).analysis.nodes[fn("main")]
+
+    assert verdict.impurity_reasons == [var("g"), var("g_rw")]
+
+
+@pytest.mark.parametrize(
+    ("addr_as", "expected"),
+    [("read", False), ("write", True), ("readwrite", True), ("manual", True)],
+)
+def test_const_read_makes_addr_as_meaningful(addr_as: str, expected: bool):
+    """§3 표의 순서. read 는 낙관적이라 오염원이 최소로, readwrite 는 보수적으로 나온다."""
+    tree = make_tree({"main": []}, uses={"main": [("g", "addr")]}, state={"g": {}})
+    verdict = analyze(
+        tree, Criteria(addr_as=addr_as, const_read=True)
+    ).analysis.nodes[fn("main")]
+
+    assert verdict.is_impure is expected
+
+
+def test_const_read_applies_to_unknown_targets_too():
+    """대상 기준은 못 걸어도 방향은 접근 자체에서 알 수 있다."""
+    tree = make_tree({"main": []}, uses={"main": [("g_missing", "read")]})
+    assert not analyze(tree, Criteria(const_read=True)).analysis.nodes[
+        fn("main")
+    ].is_impure
+
+
+def test_const_read_can_free_a_whole_subtree():
+    """읽기만 하는 노드가 풀리면 그 위쪽이 새 테스트 경계가 된다."""
+    tree = make_tree(
+        {"main": ["mid"], "mid": ["reader"], "reader": []},
+        uses={"main": [("g", "write")], "reader": [("g", "read")]},
+        state={"g": {}},
+    )
+    assert [v.usr for v in analyze(tree).clean_subtree_roots] == []
+    assert [
+        v.usr for v in analyze(tree, Criteria(const_read=True)).clean_subtree_roots
+    ] == [fn("mid")]
 
 
 def test_manual_lists_addr_sites_for_review():
@@ -401,16 +455,20 @@ def test_declaration_is_a_clean_leaf_and_gets_reported():
 def test_criteria_are_recorded_in_the_output():
     tree = make_tree({"main": []})
     criteria = Criteria(
-        exclude_const=False, include_function_static=False, addr_as="manual"
+        exclude_const=False,
+        include_function_static=False,
+        addr_as="manual",
+        const_read=True,
     )
     data = analyze(tree, criteria, source="build/calltree.json").analysis.to_dict()
 
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == ANALYSIS_SCHEMA_VERSION
     assert data["source"] == "build/calltree.json"
     assert data["criteria"] == {
         "exclude_const": False,
         "include_function_static": False,
         "addr_as": "manual",
+        "const_read": True,
     }
 
 
@@ -489,6 +547,23 @@ def test_fixture_analysis(fixture_tree: CallTree):
 def test_fixture_const_criterion_changes_the_reasons(fixture_tree: CallTree):
     result = analyze(fixture_tree, Criteria(exclude_const=False))
     assert "c:@g_cfg" in result.analysis.nodes["c:@F@process_frame"].impurity_reasons
+
+
+def test_fixture_const_read_drops_the_array_that_is_only_read(fixture_tree: CallTree):
+    """g_buf 는 process_frame 안에서 sink(g_buf) 감쇠와 g_buf[i] 읽기로만 닿는다.
+
+    감쇠를 읽기로 보면 둘 다 빠지므로 오염원 근거에서 사라진다. reset 쪽은
+    g_buf[0] = 0 으로 쓰므로 그대로 남는다.
+    """
+    nodes = analyze(
+        fixture_tree, Criteria(addr_as="read", const_read=True)
+    ).analysis.nodes
+
+    assert nodes["c:@F@process_frame"].impurity_reasons == [
+        "c:@g_flag",
+        "c:proc.c@264@F@process_frame@retry_cnt",
+    ]
+    assert "c:proc.c@g_buf" in nodes["c:proc.c@F@reset"].impurity_reasons
 
 
 def test_fixture_summary_mentions_the_priorities(fixture_tree: CallTree):

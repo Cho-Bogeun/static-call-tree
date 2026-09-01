@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 SCHEMA_VERSION = 1
-ANALYSIS_SCHEMA_VERSION = 1
+#: 2 = `criteria.const_read` 추가. 기준이 하나 늘면 올린다.
+ANALYSIS_SCHEMA_VERSION = 2
 
 Linkage = Literal["external", "internal"]
 NodeKind = Literal["definition", "declaration"]
@@ -272,12 +273,17 @@ class Criteria:
     #: 주소만 취한 접근(`addr`)을 무엇으로 간주할지. 놓치는 쪽이 과잉 계상보다
     #: 비싸므로 보수적인 `readwrite` 가 기본이다.
     addr_as: AddrAs = "readwrite"
+    #: 읽기 전용 접근을 상수 취급해 오염원 근거에서 뺀다. `addr_as` 가 방향을 정한
+    #: 뒤에 적용되므로, 꺼 두면 `read`/`write`/`readwrite` 가 같은 결과를 낸다.
+    #: 읽기도 숨은 상태에 대한 의존이라 기본값은 세는 쪽(`false`)이다.
+    const_read: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "exclude_const": self.exclude_const,
             "include_function_static": self.include_function_static,
             "addr_as": self.addr_as,
+            "const_read": self.const_read,
         }
 
     @classmethod
@@ -286,13 +292,15 @@ class Criteria:
             exclude_const=data["exclude_const"],
             include_function_static=data["include_function_static"],
             addr_as=data["addr_as"],
+            const_read=data["const_read"],
         )
 
     def describe(self) -> str:
         return (
             f"exclude_const={str(self.exclude_const).lower()} "
             f"include_function_static={str(self.include_function_static).lower()} "
-            f"addr_as={self.addr_as}"
+            f"addr_as={self.addr_as} "
+            f"const_read={str(self.const_read).lower()}"
         )
 
 

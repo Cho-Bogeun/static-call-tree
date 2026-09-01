@@ -94,12 +94,13 @@ def test_analyze_writes_schema_shaped_json(compile_commands_file: Path, tmp_path
     assert main(["analyze", str(calltree), "-o", str(analysis), "--quiet"]) == 0
 
     data = json.loads(analysis.read_text(encoding="utf-8"))
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == 2
     assert data["source"] == str(calltree)
     assert data["criteria"] == {
         "exclude_const": True,
         "include_function_static": True,
         "addr_as": "readwrite",
+        "const_read": False,
     }
     # 가지치기로 aux.c 쪽은 빠진다.
     assert "c:@F@aux_entry" not in data["nodes"]
@@ -137,10 +138,31 @@ def test_analyze_records_the_criteria_it_ran_with(
         "exclude_const": False,
         "include_function_static": False,
         "addr_as": "manual",
+        "const_read": False,
     }
     reasons = data["nodes"]["c:@F@process_frame"]["impurity_reasons"]
     assert "c:@g_cfg" in reasons  # const 를 포함시켰다
     assert not any("retry_cnt" in usr for usr in reasons)  # 함수 내 static 은 뺐다
+
+
+def test_analyze_const_read_narrows_the_reasons(
+    compile_commands_file: Path, tmp_path: Path
+):
+    """읽기 전용 접근을 빼면 addr_as 가 결과를 가른다."""
+    calltree = tmp_path / "calltree.json"
+    run_extract(compile_commands_file, calltree)
+
+    def reasons(*extra: str) -> list[str]:
+        output = tmp_path / f"a{len(extra)}{extra[-1]}.json"
+        assert (
+            main(["analyze", str(calltree), "-o", str(output), "--quiet", *extra]) == 0
+        )
+        data = json.loads(output.read_text(encoding="utf-8"))
+        return data["nodes"]["c:@F@process_frame"]["impurity_reasons"]
+
+    # g_buf 는 sink(g_buf) 감쇠와 g_buf[i] 읽기로만 닿는다. 감쇠를 읽기로 보면 빠진다.
+    assert "c:proc.c@g_buf" in reasons("--const-read", "--addr-as", "readwrite")
+    assert "c:proc.c@g_buf" not in reasons("--const-read", "--addr-as", "read")
 
 
 def test_analyze_prints_a_summary(compile_commands_file: Path, tmp_path: Path, capsys):

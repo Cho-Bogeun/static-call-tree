@@ -160,6 +160,7 @@ def test_criteria_defaults_are_the_documented_ones():
         "exclude_const": True,
         "include_function_static": True,
         "addr_as": "readwrite",
+        "const_read": False,
     }
 
 

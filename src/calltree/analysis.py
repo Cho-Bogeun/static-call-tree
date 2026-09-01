@@ -22,6 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from calltree.model import (
+    Access,
     Analysis,
     CallTree,
     Criteria,
@@ -190,24 +191,40 @@ def reachable_from(tree: CallTree, entry: str) -> set[str]:
 # --------------------------------------------------------------- 2. 오염원 판정
 
 
-def counts_as_impurity(use: StateUse, var: StateVar | None, criteria: Criteria) -> bool:
-    """이 접근이 오염원 근거가 되는가.
+def effective_access(use: StateUse, criteria: Criteria) -> Access:
+    """`addr` 을 기준이 정한 방향으로 바꾼다. 나머지는 관측된 그대로다.
 
-    참조 문서 §4 의 정의는 "`state_uses` 중 `criteria` 를 통과한 항목"이고, `criteria`
-    에는 방향을 거르는 기준이 없다. 읽기 역시 숨은 상태에 대한 의존이라 테스트하려면
-    전역을 세팅해야 하므로 오염원 근거로 센다. 방향을 거르려면 기준이 하나 늘어나고,
-    그건 `schema_version` 을 올려야 하는 변경이다(§6).
-
-    그래서 `addr_as` 는 판정을 바꾸지 않고 `read`/`write`/`readwrite` 는 같은 결과를
-    낸다. `manual` 만 확인 대상 목록을 따로 남긴다. 기준을 방향까지 보도록 바꾸려면
-    이 함수 하나만 고치면 된다.
+    `&g_state` 를 넘긴 지점에서는 읽기인지 쓰기인지 정적으로 판정할 수 없다.
+    `manual` 은 방향을 정하지 않고 보수적으로 두되 확인 대상으로 따로 뽑는 값이므로,
+    여기서는 `readwrite` 와 같이 취급한다.
     """
-    if var is None:
-        # 기준을 적용할 근거가 없다. 놓치는 쪽이 과잉 계상보다 비싸므로 센다.
-        return True
-    if criteria.exclude_const and var.is_const:
-        return False
-    if not criteria.include_function_static and var.scope == "function_static":
+    if use.access != "addr":
+        return use.access
+    if criteria.addr_as == "manual":
+        return "readwrite"
+    return criteria.addr_as
+
+
+def counts_as_impurity(use: StateUse, var: StateVar | None, criteria: Criteria) -> bool:
+    """이 접근이 오염원 근거가 되는가. 노드가 아니라 접근 하나에 대한 판단이다.
+
+    참조 문서 §4 의 정의는 "`state_uses` 중 `criteria` 를 통과한 항목"이므로, 통과
+    여부를 정하는 것은 `criteria` 뿐이다. 기준은 대상(`exclude_const`,
+    `include_function_static`)을 먼저 보고 방향(`const_read`)을 나중에 본다.
+
+    방향을 `addr_as` 로 확정한 뒤 `const_read` 를 적용하는 순서가 중요하다. 이 순서
+    덕분에 §3 표의 `read` 는 낙관적(주소만 넘긴 접근이 빠져 오염원이 최소), `readwrite`
+    는 보수적이 된다. `const_read` 가 꺼져 있으면 방향을 보지 않으므로
+    `read`/`write`/`readwrite` 가 같은 결과를 낸다.
+    """
+    if var is not None:
+        if criteria.exclude_const and var.is_const:
+            return False
+        if not criteria.include_function_static and var.scope == "function_static":
+            return False
+    # var 가 None 이면 대상 기준을 적용할 근거가 없다. 놓치는 쪽이 과잉 계상보다
+    # 비싸므로 남겨 두고, 방향 기준만 마저 본다.
+    if criteria.const_read and effective_access(use, criteria) == "read":
         return False
     return True
 

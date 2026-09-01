@@ -166,6 +166,7 @@ print([(use.target, use.access) for use in node.state_uses])
 ```bash
 calltree analyze calltree.json -o strict.json                       # 권장 기본값
 calltree analyze calltree.json -o globals-only.json --no-function-static
+calltree analyze calltree.json -o optimistic.json --const-read --addr-as read
 calltree analyze calltree.json -o suspicious.json --include-const --addr-as manual
 ```
 
@@ -174,9 +175,29 @@ calltree analyze calltree.json -o suspicious.json --include-const --addr-as manu
 | `--include-const` | 꺼짐 | `const` 상태 접근도 오염원 근거로 센다. 캐스팅으로 변경되는 코드를 의심할 때 |
 | `--no-function-static` | 꺼짐 | 함수 내 `static` 을 뺀다. "전역만 먼저 정리한다"는 축소된 범위 |
 | `--addr-as` | `readwrite` | 주소만 취한 접근을 무엇으로 볼지. `manual` 은 확인 대상 목록을 따로 뽑는다 |
+| `--const-read` | 꺼짐 | 읽기 전용 접근을 상수 취급해 뺀다 |
 
 쓴 기준은 결과 파일의 `criteria` 에 그대로 들어간다. 어떤 결과가 어떤 기준에서
 나왔는지 구분되지 않으면 비교가 무의미해지기 때문이다.
+
+**`--const-read` 와 `--addr-as` 는 짝으로 움직인다.** 기준은 대상을 먼저 보고
+(`--include-const`, `--no-function-static`) 방향을 나중에 본다. `--addr-as` 가 주소
+취득의 방향을 확정하고, `--const-read` 가 그 방향을 보고 거른다. 그래서
+`--const-read` 가 꺼져 있으면 방향을 아예 보지 않으므로 `read`/`write`/`readwrite`
+가 같은 결과를 낸다(`manual` 만 확인 목록이 따로 붙는다).
+
+```console
+$ calltree analyze calltree.json --const-read --addr-as read      # 낙관적
+     1  process_frame        g_flag, retry_cnt
+
+$ calltree analyze calltree.json --const-read --addr-as readwrite  # 보수적
+     1  process_frame        g_flag, retry_cnt, g_buf
+```
+
+`g_buf` 는 `process_frame` 안에서 `sink(g_buf)`(감쇠 → `addr`)와 `g_buf[retry_cnt]`
+(읽기)로만 닿는다. 감쇠를 읽기로 보면 둘 다 빠져 오염원 근거에서 사라지고, 주소를
+넘긴 쪽에서 실제로 값을 바꾸고 있었다면 그만큼 놓친다. 문서 §3 이 `readwrite` 를
+권장 기본값으로 둔 이유다.
 
 `--quiet` 가 아니면 표준에러로 요약이 나온다. 참조 문서 §7 의 읽는 순서 그대로다.
 
@@ -184,7 +205,7 @@ calltree analyze calltree.json -o suspicious.json --include-const --addr-as manu
 $ calltree analyze calltree.json -o analysis.json
 진입점   : process_frame
 도달 노드: 6개 (전체 9개 중)
-기준     : exclude_const=true include_function_static=true addr_as=readwrite
+기준     : exclude_const=true include_function_static=true addr_as=readwrite const_read=false
 
 오염원 2개 — 오염도 내림차순, 수정 대상 우선순위
      2  reset  (src/proc.c:5)
@@ -245,18 +266,18 @@ for verdict in result.clean_subtree_roots:    # 오늘 붙일 수 있는 테스�
 
 분석 쪽은 다음과 같이 정했다.
 
-- **`addr_as` 는 판정을 바꾸지 않는다.** `contamination-analysis.md` §4 의 정의는
-  "`state_uses` 중 `criteria` 를 통과한 항목이 하나라도 있는가"이고, `criteria` 에는
-  방향을 거르는 기준이 없다. 읽기 역시 숨은 상태에 대한 의존이라 테스트하려면 전역을
-  세팅해야 하므로 오염원 근거로 센다(그렇지 않다면 `const` 룩업 테이블을 따로 뺄
-  이유도 없어진다). 그래서 `read`/`write`/`readwrite` 는 같은 결과를 내고, `manual`
-  만 확인 대상 목록을 따로 남긴다. §3 표의 "`read` 는 오염원 수가 최소"를 살리려면
-  방향을 보는 기준이 하나 늘어야 하는데, 그건 `criteria` 에 필드가 붙는 변경이라
-  §6 대로 `schema_version` 을 올려야 한다. 규칙은
-  `analysis.counts_as_impurity()` 하나에 모여 있으므로 바꾸려면 그 함수만 고치면 된다.
-- **`state` 에 없는 접근 대상은 오염원으로 센다.** 기준(`is_const`, `scope`)을 적용할
-  근거가 없기 때문이다. 놓치는 쪽이 과잉 계상보다 비싸다는 `addr_as` 의 판단과 같다.
-  해당 USR 목록은 요약에 나온다.
+- **`const_read` 기준을 하나 더 두었다** (`analysis.schema.json` 의
+  `schema_version: 2`). 문서 §3 표는 `addr_as: read` 가 "오염원 수가 최소"라고 하는데,
+  §4 의 정의("`state_uses` 중 `criteria` 를 통과한 항목")에는 방향을 거르는 기준이
+  없어 그대로 구현하면 `read`/`write`/`readwrite` 가 같은 결과를 낸다. 반대로 읽기를
+  일괄 제외하면 이번엔 `exclude_const` 의 근거("`const` 룩업 테이블")가 무색해진다 —
+  룩업 테이블은 읽기만 하므로 애초에 세이지 않는다. 두 문장이 서로 맞지 않으므로,
+  §6 이 정한 절차대로 기준을 하나 늘려 양쪽을 다 고를 수 있게 했다. 기본값은
+  `false`(읽기도 센다)로, 지금까지의 결과가 그대로 나오는 쪽이다.
+- **`state` 에 없는 접근 대상은 대상 기준을 건너뛴다.** `is_const` 도 `scope` 도 볼
+  근거가 없기 때문이다. 놓치는 쪽이 과잉 계상보다 비싸므로 남긴다. 다만 방향은 접근
+  자체에서 알 수 있으므로 `const_read` 는 그대로 적용된다. 해당 USR 목록은 요약에
+  나온다.
 - **`unresolved_calls` 는 그 노드의 조상까지 막는다.** "서브트리 전체에서 비어 있다"는
   조건이므로, 함수 포인터를 부르는 노드 자신도 깨끗한 서브트리 루트가 될 수 없다.
 - **부모 조건의 "오염되어 있다"는 `is_impure` 또는 `is_contaminated` 로 읽는다.**
