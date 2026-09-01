@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -110,6 +111,64 @@ def test_broken_smoke_result_stops_extraction(monkeypatch: pytest.MonkeyPatch):
     message = str(exc.value)
     assert "틀린 콜트리가 나오므로 멈춘다" in message
     assert "콜 엣지가 기대와 다르다" in message
+
+
+# ---------------------------------------------------------- 네이티브 버전 읽기
+
+
+def test_clang_version_is_readable():
+    """네이티브 버전을 실제로 읽는다.
+
+    `"unknown"` 이면 `_check_versions` 의 메이저 대조가 통째로 꺼진다. 그 상태로는
+    바인딩/네이티브 불일치를 막는 코드가 있으나 없으나 같다.
+    """
+    version = loader.clang_version()
+    assert version != "unknown"
+    assert re.search(r"clang version (\d+)", version), version
+
+
+def test_clang_version_survives_a_one_argument_from_result(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """clang 21.x 바인딩의 `from_result(res)` 시그니처에서도 읽어야 한다.
+
+    ctypes 의 errcheck 규약은 콜러블을 3인자로 부른다. 거기에 1인자 헬퍼를 걸면
+    `TypeError` 가 나고, 그걸 삼키면 `"unknown"` 이 되어 버전 관문이 꺼진다.
+    18.x 바인딩에서는 `from_result(res, fn=None, args=None)` 라 그냥 돌아가므로,
+    21.x 의 시그니처를 흉내 내야 이 회귀가 잡힌다.
+    """
+    cindex = loader.configure()
+    original = cindex._CXString.from_result
+
+    def one_argument_from_result(res):  # clang 21.x 와 같은 시그니처
+        return original(res)
+
+    monkeypatch.setattr(
+        cindex._CXString, "from_result", staticmethod(one_argument_from_result)
+    )
+    assert loader.clang_version() != "unknown"
+
+
+def test_version_mismatch_still_raises_with_the_real_version(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """대조가 살아 있는지. `clang_version` 은 진짜를 쓰고 바인딩 쪽만 바꾼다.
+
+    위쪽의 불일치 테스트들은 `clang_version` 자체를 몽키패치하므로, 그 함수가
+    고장나 있어도 통과한다. 결함이 여기까지 살아온 이유다.
+    """
+    monkeypatch.delenv(loader.ENV_ALLOW_MISMATCH, raising=False)
+    monkeypatch.setattr(loader, "binding_version", lambda *a, **k: ("clang", "9.0.0"))
+
+    with pytest.raises(LibclangUnavailable, match="메이저 버전이 다르다"):
+        loader.require()
+
+
+def test_native_major_ignores_a_distro_prefix():
+    """배포판 접두에 숫자가 있어도 clang 의 메이저를 집는다."""
+    assert loader._native_major("Ubuntu clang version 21.1.8 (++2025...)") == 21
+    assert loader._native_major("Ubuntu 24.04 clang version 18.1.3") == 18
+    assert loader._native_major("clang version 16.0.6") == 16
 
 
 # -------------------------------------------------------------- 빌트인 헤더
