@@ -59,7 +59,7 @@ def validate(data: dict[str, Any], schema: dict[str, Any] | None = None) -> list
         import jsonschema
     except ImportError as exc:  # pragma: no cover - 선택 의존성
         raise RuntimeError(
-            "jsonschema 가 필요하다: pip install 'calltree[validate]'"
+            "jsonschema 가 필요하다: pip install 'cstat[validate]'"
         ) from exc
 
     validator = jsonschema.Draft202012Validator(schema or load_schema())
