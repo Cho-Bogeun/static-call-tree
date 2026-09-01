@@ -24,6 +24,11 @@ cstat = "cstat.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# 그림의 뼈대(HTML/CSS/JS)는 파이썬 문자열이 아니라 진짜 파일로 둔다. 휠에도
+# 같이 실려야 `cstat visualize` 가 어디서든 돈다.
+[tool.setuptools.package-data]
+visualize = ["assets/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

@@ -15,7 +15,7 @@ def test_subcommands_are_the_two_stages_plus_utilities(capsys):
     with pytest.raises(SystemExit):
         main(["--help"])
     usage = capsys.readouterr().out
-    assert "{calltree,analyze,validate,doctor}" in usage
+    assert "{calltree,analyze,visualize,validate,doctor}" in usage
 
 
 def test_version_names_the_command(capsys):

@@ -2,11 +2,13 @@
 
     cstat calltree -c build/compile_commands.json -e process_frame -o calltree.json
     cstat analyze calltree.json -o analysis.json
+    cstat visualize calltree.json -o contamination.html
     cstat validate analysis.json
     cstat doctor
 
 단계마다 명령이 하나씩이다. `calltree` 는 소스를 훑어 사실을 뽑고, `analyze` 는 그
-결과만 읽어 판단을 붙인다.
+결과만 읽어 판단을 붙이고, `visualize` 는 그 판단을 사람이 보고 결정할 수 있는
+그림으로 낸다.
 
 `validate` 가 여기 있는 이유는 두 스키마를 다 아는 곳이 여기뿐이기 때문이다.
 `calltree` 도 `analyze` 도 상대의 스키마를 모르고, 알 필요도 없다.
@@ -25,12 +27,13 @@ from analyze.validation import schema_for
 from calltree import cli as calltree_cli
 from calltree.validation import load_schema, validate
 from cstat import __version__
+from visualize import cli as visualize_cli
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cstat",
-        description="정적 콜트리 추출과 오염 분석",
+        description="정적 콜트리 추출, 오염 분석, 시각화",
     )
     parser.add_argument("--version", action="version", version=f"cstat {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -47,6 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
             "analyze",
             help="콜트리를 오염 판정한다 (libclang 불필요)",
             description="calltree.json 을 읽어 analysis.json 을 만든다.",
+        )
+    )
+    visualize_cli.add_arguments(
+        sub.add_parser(
+            "visualize",
+            help="판정 결과를 읽을 수 있는 그림 한 장으로 낸다",
+            description="calltree.json 을 읽어 자립 HTML 한 장을 만든다.",
         )
     )
 
@@ -81,6 +91,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return calltree_cli.run(args)
     if args.command == "analyze":
         return analyze_cli.run(args)
+    if args.command == "visualize":
+        return visualize_cli.run(args)
     if args.command == "doctor":
         return calltree_cli.run_doctor(args)
     return run_validate(args)

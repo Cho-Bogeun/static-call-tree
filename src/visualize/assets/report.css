@@ -1,0 +1,346 @@
+/* 색은 §2·§3 이 정한 배정을 그대로 옮긴 것이다.
+ *
+ *   채도는 "얼마나 나쁜가"가 아니라 "내가 손댈 대상인가"에 비례한다.
+ *
+ * 그래서 강한 색은 오염원 하나뿐이다. 오염됨은 트리 대부분을 차지하므로 옅은
+ * 색조로 두어 영역으로만 읽히게 하고(빨갛게 칠하면 화면 전체가 빨개진다), 오염됨의
+ * 색조는 오염원과 **다른 계열**로 잡는다(§10). 깨끗함은 눈이 가지 않아야 하지만,
+ * 확보된 경계는 색의 부재가 아니라 별도 처리로 구분한다(§3 의 예외).
+ * 회수됨(시뮬레이션)은 네 가지 어디에도 섞이면 안 되므로 보라 계열을 따로 쓴다.
+ */
+:root {
+  --bg: #ffffff;
+  --panel: #fbfbf9;
+  --line: #e7e6e1;
+  --ink: #26262a;
+  --muted: #8a8a83;
+
+  --clean-fill: #fcfcfb;
+  --clean-stroke: #dcdcd5;
+  --clean-ink: #90908a;
+
+  --bound-fill: #e9f3ec;
+  --bound-stroke: #2f8560;
+  --bound-ink: #1c5940;
+
+  --cont-fill: #e9ecf5;
+  --cont-stroke: #b6bfd7;
+  --cont-ink: #48516d;
+
+  --impure-fill: #cc2f45;
+  --impure-stroke: #8d1e2d;
+  --impure-ink: #ffffff;
+
+  --recov-fill: #f3e9fc;
+  --recov-stroke: #7d4fc2;
+  --recov-ink: #4a2b7a;
+
+  --edge: #e0dfd9;
+  --edge-prop: #a6aec4;
+  --edge-hot: #cc2f45;
+
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "Noto Sans KR", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.5 var(--sans);
+  /* §10 — 비교는 정지 화면 두 장으로 한다. 전환 애니메이션을 두지 않는다. */
+}
+
+.mono { font-family: var(--mono); }
+.muted { color: var(--muted); }
+
+/* ------------------------------------------------------------------ 머리말 */
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.who { display: flex; align-items: center; gap: 8px; }
+.who b { font-size: 15px; }
+
+.tag {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: .04em;
+}
+
+/* 진입점이 지금 어떤 상태인지가 이 화면의 결론이다. 머리말에서 바로 읽혀야 한다. */
+.chip {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.chip.bad { background: var(--impure-fill); color: #fff; }
+.chip.warn { background: var(--cont-fill); color: var(--cont-ink); border-color: var(--cont-stroke); }
+.chip.good { background: var(--bound-fill); color: var(--bound-ink); border-color: var(--bound-stroke); }
+.chip.sim { background: var(--recov-fill); color: var(--recov-ink); border-color: var(--recov-stroke); }
+
+.counts { color: var(--muted); font-size: 12px; }
+.counts b { color: var(--ink); font-weight: 600; }
+.counts .sep { padding: 0 6px; opacity: .5; }
+
+.tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.toggle input { margin: 0; }
+
+button {
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+button:hover { background: #f4f4f1; }
+button:disabled { color: var(--muted); cursor: default; background: #fff; }
+
+/* -------------------------------------------------------------------- 본문 */
+
+main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  cursor: grab;
+}
+.stage.dragging { cursor: grabbing; }
+
+#canvas { width: 100%; height: 100%; display: block; }
+
+/* --------------------------------------------------------------- 노드와 간선 */
+
+.node text {
+  font-family: var(--mono);
+  font-size: 12px;
+  pointer-events: none;
+  user-select: none;
+}
+.node rect { stroke-width: 1; }
+.node { cursor: pointer; }
+
+.s-clean rect { fill: var(--clean-fill); stroke: var(--clean-stroke); }
+.s-clean text { fill: var(--clean-ink); }
+
+.s-boundary rect { fill: var(--bound-fill); stroke: var(--bound-stroke); stroke-width: 1.5; }
+.s-boundary text { fill: var(--bound-ink); }
+
+.s-cont rect { fill: var(--cont-fill); stroke: var(--cont-stroke); }
+.s-cont text { fill: var(--cont-ink); }
+
+/* 유일하게 강한 색. 라벨도 여기서만 키운다(§9) — 소수고, 찾아야 할 대상이다. */
+.s-impure rect { fill: var(--impure-fill); stroke: var(--impure-stroke); }
+.s-impure text { fill: var(--impure-ink); font-size: 13px; font-weight: 600; }
+
+.s-recovered rect {
+  fill: var(--recov-fill);
+  stroke: var(--recov-stroke);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 2.5;
+}
+.s-recovered text { fill: var(--recov-ink); }
+
+/* 내가 고르는 중인 오염원. 회수됨과 겹치므로 표시는 테두리로만 한다. */
+.picked rect { stroke-dasharray: none; stroke-width: 2.5; }
+
+.node .deg { opacity: .85; }
+.node .badge { opacity: .75; }
+.node .mark { opacity: .8; }
+
+.entry rect { stroke: #26262a; stroke-width: 2; }
+
+/* 호버가 만든 하이라이트. 색을 바꾸지 않고 윤곽만 세운다 — 상태 색과 섞이면
+ * 지금 보고 있는 것이 현재 상태인지 강조인지 구분되지 않는다. */
+.node.hot rect { stroke: var(--edge-hot); stroke-width: 2.5; }
+.stage.hovering .node:not(.hot) { opacity: .45; }
+.stage.hovering .edge:not(.hot) { opacity: .2; }
+
+.pill rect { fill: none; stroke: var(--clean-stroke); stroke-dasharray: 3 3; }
+.pill text { fill: var(--clean-ink); font-size: 11px; }
+
+.edge { fill: none; stroke: var(--edge); stroke-width: 1; }
+.edge.prop { stroke: var(--edge-prop); stroke-width: 1.4; }
+.edge.cross { stroke-dasharray: 5 3; }
+.edge.hot { stroke: var(--edge-hot); stroke-width: 2; }
+
+/* -------------------------------------------------------------------- 범례 */
+
+.legend {
+  position: absolute;
+  left: 12px;
+  bottom: 34px;
+  background: rgba(255,255,255,.94);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  max-width: 430px;
+}
+.legend-head { color: var(--muted); margin-bottom: 5px; }
+.legend ul { list-style: none; margin: 0; padding: 0; }
+.legend li { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+
+.sw {
+  width: 15px; height: 11px;
+  border-radius: 2px;
+  flex: none;
+}
+.sw-clean { background: var(--clean-fill); border: 1px solid var(--clean-stroke); }
+.sw-boundary { background: var(--bound-fill); border: 1.5px solid var(--bound-stroke); }
+.sw-cont { background: var(--cont-fill); border: 1px solid var(--cont-stroke); }
+.sw-impure { background: var(--impure-fill); border: 1px solid var(--impure-stroke); }
+.sw-recovered { background: var(--recov-fill); border: 1.5px dashed var(--recov-stroke); }
+
+.gl {
+  font-family: var(--mono);
+  font-style: normal;
+  color: var(--muted);
+  min-width: 15px;
+  text-align: center;
+  flex: none;
+}
+.ed { width: 22px; height: 0; border-top: 1.4px solid var(--edge-prop); flex: none; }
+.ed-cross { border-top-style: dashed; margin-left: 10px; }
+
+.hint {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tooltip {
+  position: absolute;
+  z-index: 5;
+  max-width: 340px;
+  padding: 7px 9px;
+  background: #26262a;
+  color: #f4f4f2;
+  border-radius: 5px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+.tooltip b { font-family: var(--mono); font-size: 12px; }
+.tooltip .t-line { color: #b9b9b2; }
+.tooltip .t-reason { font-family: var(--mono); }
+
+/* -------------------------------------------------------------------- 순위표 */
+
+/* 그래프는 모양을, 목록은 순서를 보여준다(§7). 둘은 호버로 이어져 있다. */
+.side {
+  width: 340px;
+  flex: none;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.sim {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 9px 10px;
+  margin-bottom: 14px;
+}
+.sim .sim-line { display: flex; align-items: baseline; gap: 6px; }
+.sim b { font-size: 15px; }
+.sim .sim-help { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+.sim button { margin-top: 8px; width: 100%; }
+
+.rank-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+}
+.rank-head b { color: var(--ink); font-size: 13px; }
+
+.rank { list-style: none; margin: 0 0 14px; padding: 0; }
+
+.rank li {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 8px;
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.rank li:hover, .rank li.hot { background: #f2f1ed; }
+.rank li.picked { background: var(--recov-fill); }
+
+.r-deg {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: right;
+  color: var(--impure-fill);
+}
+.rank li.picked .r-deg { color: var(--recov-ink); text-decoration: line-through; }
+
+.r-name { font-family: var(--mono); font-size: 12.5px; }
+.r-sub { color: var(--muted); font-size: 11px; }
+.r-reasons { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px; }
+
+.r-var {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 4px;
+  color: var(--ink);
+}
+.r-var .acc { color: var(--muted); }
+.r-var.static { border-style: dashed; }
+
+.notes, .meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin-top: 8px;
+}
+.notes-head { color: var(--ink); margin-bottom: 4px; }
+.notes p { margin: 0 0 4px; }
+.notes .mono, .meta .mono { font-size: 11px; }
+.meta div { padding: 1px 0; word-break: break-all; }
