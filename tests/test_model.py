@@ -111,3 +111,4 @@ def test_declaration_node_has_no_body_facts():
     assert data["state_uses"] == []
     assert data["unresolved_calls"] == []
     assert node.is_definition is False
+

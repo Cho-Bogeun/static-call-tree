@@ -2,6 +2,9 @@
 
 직렬화 규칙은 스키마가 정한다. 스키마가 `additionalProperties: false` 이므로
 `to_dict()` 는 스키마에 없는 필드를 절대 내보내지 않는다.
+
+판정 결과(`analysis.schema.json`)의 모델은 `analyze.model` 에 따로 있다. 두 파일은
+같은 USR 을 키로 쓰므로 조인이 자명하고, 파일이 갈리는 만큼 타입도 갈라 둔다.
 """
 
 from __future__ import annotations
@@ -245,3 +248,4 @@ class CallTree:
                 usr: StateVar.from_dict(usr, var) for usr, var in data["state"].items()
             },
         )
+
