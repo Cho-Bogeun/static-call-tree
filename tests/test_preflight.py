@@ -21,7 +21,7 @@ def cli(*argv: str, **env_overrides: str) -> subprocess.CompletedProcess[str]:
     env.pop(loader.ENV_ALLOW_MISMATCH, None)
     env.update(env_overrides)
     return subprocess.run(
-        [sys.executable, "-m", "calltree.cli", *argv],
+        [sys.executable, "-m", "cstat.cli", *argv],
         capture_output=True,
         text=True,
         env=env,
@@ -119,7 +119,7 @@ def test_extract_stops_before_touching_any_input(tmp_path: Path):
     """libclang 이 깨졌으면 compile_commands.json 을 읽기도 전에 멈춘다."""
     missing_db = tmp_path / "compile_commands.json"  # 존재하지 않는다
     result = cli(
-        "extract",
+        "calltree",
         "-c",
         str(missing_db),
         "-e",

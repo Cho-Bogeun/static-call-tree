@@ -5,8 +5,38 @@ from pathlib import Path
 
 import pytest
 
-from calltree.cli import main
 from conftest import FIXTURE_ROOT
+from cstat.cli import main
+
+# ------------------------------------------------------------------ 명령 구성
+
+
+def test_subcommands_are_the_two_stages_plus_utilities(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    usage = capsys.readouterr().out
+    assert "{calltree,analyze,validate,doctor}" in usage
+
+
+def test_version_names_the_command(capsys):
+    with pytest.raises(SystemExit):
+        main(["--version"])
+    assert capsys.readouterr().out.startswith("cstat ")
+
+
+def test_unknown_subcommand_fails(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["extract"])
+    assert exc.value.code == 2
+
+
+def test_doctor_reports_a_usable_libclang(capsys):
+    """conftest 가 이미 점검했으므로 여기서는 통과해야 한다."""
+    assert main(["doctor"]) == 0
+    assert "스모크 파싱" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------- 추출
 
 
 def run_extract(
@@ -14,7 +44,7 @@ def run_extract(
 ) -> int:
     return main(
         [
-            "extract",
+            "calltree",
             "--compile-commands",
             str(compile_commands),
             "--entry",
@@ -244,7 +274,7 @@ def test_analyze_rejects_entry_missing_from_nodes(
 def test_extract_to_stdout(compile_commands_file: Path, capsys):
     exit_code = main(
         [
-            "extract",
+            "calltree",
             "-c",
             str(compile_commands_file),
             "-e",

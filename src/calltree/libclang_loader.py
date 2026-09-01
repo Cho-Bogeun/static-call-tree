@@ -49,7 +49,7 @@ INSTALL_HELP = f"""\
 
       pip uninstall -y libclang && pip install 'clang==18.1.8'
 
-확인:  calltree doctor"""
+확인:  cstat doctor"""
 
 
 class LibclangUnavailable(RuntimeError):
