@@ -101,6 +101,67 @@ def test_extract_validates_when_asked(compile_commands_file: Path, tmp_path: Pat
     assert run_extract(compile_commands_file, output, "process_frame", "--validate") == 0
 
 
+# ------------------------------------------------------- 파싱 에러의 종료 코드
+
+
+def broken_compile_commands(tmp_path: Path) -> Path:
+    """파싱 에러가 반드시 나는 1-TU 프로젝트.
+
+    에러가 있는 콜트리는 "덜 뽑힌" 것이 아니라 "엣지가 조용히 빠진" 것이다.
+    """
+    source = tmp_path / "broken.c"
+    source.write_text(
+        "#include <definitely_not_a_real_header.h>\n"
+        "int leaf(int v);\n"
+        "int broken_entry(int v) { return leaf(v); }\n",
+        encoding="utf-8",
+    )
+    db = tmp_path / "compile_commands.json"
+    db.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": "broken.c",
+                    "arguments": ["cc", "-std=c11", "-c", "broken.c", "-o", "broken.o"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return db
+
+
+def test_parse_errors_fail_by_default(tmp_path: Path, capsys):
+    """기본값이 실패다. 종료 코드 0 으로 틀린 결과를 내보내지 않는다."""
+    db = broken_compile_commands(tmp_path)
+    output = tmp_path / "calltree.json"
+
+    assert run_extract(db, output, "broken_entry") == 1
+
+    err = capsys.readouterr().err
+    assert "--allow-parse-errors" in err  # 빠져나갈 길을 알려준다
+    assert "definitely_not_a_real_header.h" in err  # -q 여도 사유는 보여준다
+    assert output.exists()  # 결과는 그대로 쓴다. 알리는 것은 종료 코드다.
+
+
+def test_allow_parse_errors_is_the_opt_out(tmp_path: Path):
+    db = broken_compile_commands(tmp_path)
+    output = tmp_path / "calltree.json"
+    assert run_extract(db, output, "broken_entry", "--allow-parse-errors") == 0
+
+
+def test_strict_is_accepted_as_a_no_op(tmp_path: Path):
+    """옛 스크립트가 --strict 를 계속 줘도 그대로 돈다. 이제는 그게 기본이다."""
+    db = broken_compile_commands(tmp_path)
+    assert run_extract(db, tmp_path / "calltree.json", "broken_entry", "--strict") == 1
+
+
+def test_clean_sources_still_exit_zero(compile_commands_file: Path, tmp_path: Path):
+    """기본값을 조인 것이 멀쩡한 프로젝트까지 막지는 않는다."""
+    assert run_extract(compile_commands_file, tmp_path / "calltree.json") == 0
+
+
 def test_validate_subcommand_round_trip(compile_commands_file: Path, tmp_path: Path):
     pytest.importorskip("jsonschema")
     output = tmp_path / "calltree.json"

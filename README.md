@@ -90,15 +90,18 @@
 ## 설치
 
 ```bash
-pip install -e ".[dev]"
+apt install libclang-18-dev                                    # 네이티브 .so
+export CALLTREE_LIBCLANG_LIBRARY=/usr/lib/llvm-18/lib/libclang.so.1
+
+pip install -e ".[dev]"                                        # 파이썬 바인딩
 cstat doctor          # libclang 이 실제로 쓸 만한지 확인
 ```
 
 `doctor` 가 이렇게 나오면 준비된 것이다.
 
 ```
-네이티브 libclang : clang version 18.1.1
-파이썬 바인딩     : libclang 18.1.1
+네이티브 libclang : clang version 18.1.3
+파이썬 바인딩     : clang 18.1.8
 스모크 파싱       : 통과
 ```
 
@@ -107,14 +110,7 @@ cstat doctor          # libclang 이 실제로 쓸 만한지 확인
 파이썬 바인딩(`clang.cindex`)과 네이티브 `libclang.so` 는 별개의 물건이고, **메이저
 버전이 같아야** 한다. 두 가지 방법이 있다.
 
-**[1] PyPI 휠 하나로 (권장).** 바인딩과 `.so` 가 한 벌로 온다.
-
-```bash
-pip uninstall -y clang          # 두 패키지는 같은 clang/ 디렉터리를 덮어쓴다
-pip install 'libclang==18.1.1'
-```
-
-**[2] 시스템 clang 사용.**
+**[1] 시스템 clang (권장).** 기본 의존이 이쪽이다.
 
 ```bash
 apt install libclang-18-dev     # Debian/Ubuntu
@@ -124,8 +120,28 @@ brew install llvm               # macOS
 export CALLTREE_LIBCLANG_LIBRARY=/usr/lib/llvm-18/lib/libclang.so.1
 export CALLTREE_LIBCLANG_LIBRARY=$(brew --prefix llvm)/lib/libclang.dylib   # macOS
 
-pip uninstall -y libclang && pip install 'clang==18.1.8'   # .so 의 메이저에 맞춘다
+pip install 'clang==18.1.8'     # .so 의 메이저에 맞춘다
 ```
+
+**[2] PyPI 휠 (시스템에 clang 을 깔 수 없을 때만).**
+
+```bash
+pip uninstall -y clang          # 두 패키지는 같은 clang/ 디렉터리를 덮어쓴다
+pip install -e ".[bundled-libclang]"
+```
+
+이 휠은 `libclang.so` 만 담고 **clang 리소스 디렉터리(빌트인 헤더)를 담지 않는다.**
+그러면 `stddef.h` 를 못 찾고, `NULL` 이 미정의 식별자가 되고, clang 의 에러 복구가
+**그 식별자를 인자로 쓰는 호출식을 AST 에서 통째로 지운다.** 진단은 "헤더를 못
+찾았다"인데 실제로 사라지는 것은 콜 엣지다. 리소스 디렉터리를 따로 갖고 있다면
+`compile_commands.json` 의 인자에 넣어라.
+
+```
+-resource-dir=/usr/lib/llvm-18/lib/clang/18
+```
+
+넣지 않으면 `cstat doctor` 가 잡고 멈춘다. 스모크 조각이 `#include <stddef.h>` 와
+`NULL` 을 쓰는 호출을 갖고 있어서, 콜 엣지 검사가 곧 빌트인 헤더 검사다.
 
 같은 안내가 실패 메시지에도 그대로 붙어 나오므로, 막히면 에러 메시지만 보면 된다.
 
@@ -138,11 +154,16 @@ pip uninstall -y libclang && pip install 'clang==18.1.8'   # .so 의 메이저�
 | 바인딩이 `.so` 보다 최신 | `undefined symbol` 로 죽음 | 시작 전에 잡고 설치법 출력, 종료 코드 2 |
 | 바인딩이 `.so` 보다 구형 | **조용히 로드됨.** 새 커서 종류를 놓쳐 틀린 콜트리가 나온다 | 메이저 버전 대조로 잡고 멈춘다 |
 | `clang` 과 `libclang` 이 둘 다 설치됨 | 나중에 설치된 쪽이 덮어써서 무엇이 사는지 불명 | 잡고 멈춘다 |
+| 빌트인 헤더가 없음 (PyPI `libclang` 휠) | **조용히 잘린 콜트리.** `stddef.h` 를 못 찾아 `NULL` 이 미정의가 되고, 에러 복구가 호출식을 AST 에서 지운다 | 스모크 조각의 콜 엣지가 사라지므로 잡고 멈춘다 |
 
 그래서 `cstat calltree` 는 **compile_commands.json 을 열기 전에** 점검부터 한다. 로딩과 버전
 대조에 더해, 작은 C 조각을 실제로 훑어서 콜 엣지·접근 방향·`function_static` 소유자
 같은 우리가 의존하는 관측이 그대로 나오는지 본다(`src/calltree/preflight.py`).
 하나라도 어긋나면 아무 것도 추출하지 않고 종료 코드 2 로 멈춘다.
+
+그 조각이 `#include <stddef.h>` 로 시작하고 `smoke_leaf(v, NULL)` 을 부르는 것은
+취향이 아니라 관문이다. 빌트인 헤더가 없는 파서에서는 이 호출식이 통째로 사라지므로,
+**콜 엣지 검사 하나가 곧 빌트인 헤더 검사**가 된다. 새 검사를 붙일 필요가 없었다.
 
 메이저 버전 대조만 무시하려면 `CALLTREE_ALLOW_VERSION_MISMATCH=1` 이 있지만, 조용히
 틀린 결과를 받게 되므로 권하지 않는다. 스모크 파싱 실패는 무시할 수 없다.
@@ -172,8 +193,13 @@ cstat validate calltree.json
 cstat validate analysis.json
 ```
 
-종료 코드: `0` 성공, `1` 스키마 위반이나 `--strict` 실패, `2` libclang 문제로 아무
+종료 코드: `0` 성공, `1` 스키마 위반이나 파싱 에러, `2` libclang 문제로 아무
 것도 하지 못함.
+
+**파싱 에러는 기본이 실패다.** 에러가 있는 콜트리는 "덜 뽑힌" 것이 아니라 **엣지가
+조용히 빠진** 것이다. clang 의 에러 복구는 해석에 실패한 식별자를 인자로 쓰는 호출식을
+AST 에서 통째로 지우므로, 그 위에 세운 오염도와 "깨끗한 서브트리" 는 볼 가치가 없다.
+어차피 헤더 경로부터 고쳐야 한다. 그래도 내보내려면 `--allow-parse-errors` 를 준다.
 
 `cstat calltree` 의 옵션:
 
@@ -182,7 +208,7 @@ cstat validate analysis.json
 | `--entry` | 진입점. 함수 이름 또는 USR. 이름이 여러 노드에 걸리면(파일마다 있는 static `init` 등) 후보를 보여주고 멈춘다 |
 | `--root` | `loc.file` 을 상대경로로 만들 기준 디렉터리 |
 | `--include-system` | 시스템 헤더의 선언까지 노드로 기록 |
-| `--strict` | 파싱 에러가 하나라도 있으면 종료 코드 1 |
+| `--allow-parse-errors` | 파싱 에러가 있어도 종료 코드 0. 기본은 실패다 |
 | `--libclang` | libclang 공유 라이브러리 경로 |
 
 `cstat doctor` 는 점검만 하고 결과를 보여준다. `--libclang` 을 같이 줄 수 있다.

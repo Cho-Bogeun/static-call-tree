@@ -112,6 +112,59 @@ def test_broken_smoke_result_stops_extraction(monkeypatch: pytest.MonkeyPatch):
     assert "콜 엣지가 기대와 다르다" in message
 
 
+# -------------------------------------------------------------- 빌트인 헤더
+
+
+def test_smoke_source_carries_the_builtin_header_tripwire():
+    """스모크 조각이 빌트인 헤더 없는 파서에 반응할 재료를 갖고 있는지.
+
+    빌트인 헤더가 없으면 `stddef.h` 를 못 찾고, 그러면 `NULL` 이 미정의 식별자가
+    되고, clang 의 에러 복구가 그 인자를 쓰는 **호출식을 AST 에서 지운다.** 그래서
+    기존의 콜 엣지 검사가 곧 "빌트인 헤더가 있는가" 검사가 된다. 이 두 줄이 빠지면
+    그 검사가 무력해지므로 여기 못박아 둔다.
+    """
+    from calltree.preflight import SMOKE_SOURCE
+
+    assert "#include <stddef.h>" in SMOKE_SOURCE
+    assert "smoke_leaf(v, NULL)" in SMOKE_SOURCE
+
+
+def test_missing_builtin_headers_erase_the_call_edge():
+    """빌트인 헤더를 뺏으면 실제로 엣지가 사라지는지 — 실측.
+
+    `-nobuiltininc` 는 clang 리소스 디렉터리만 검색 경로에서 뺀다. PyPI `libclang`
+    휠이 만드는 상태(`.so` 는 있고 빌트인 헤더는 없다)와 정확히 같다.
+    `-resource-dir` 을 없는 경로로 주는 방법은 배포판이 다른 경로에서 헤더를
+    찾아내는 환경이 있어 재현되지 않는다.
+    """
+    from calltree.extract import TUExtractor
+    import calltree.preflight as preflight_module
+
+    result = TUExtractor(root=Path.cwd()).parse(
+        preflight_module.SMOKE_NAME,
+        args=["-std=c11", "-nobuiltininc"],
+        unsaved_files=[(preflight_module.SMOKE_NAME, preflight_module.SMOKE_SOURCE)],
+    )
+
+    assert result.has_errors, "빌트인 헤더 없이도 파싱이 성공하면 스모크 조각이 무력하다"
+    entry = result.nodes["c:@F@smoke_entry"]
+    assert [call.callee for call in entry.calls] == [], (
+        "에러 복구가 호출식을 지우지 않았다면 이 조각으로는 절단을 못 잡는다"
+    )
+
+
+def test_preflight_stops_a_parser_without_builtin_headers():
+    """그 상태를 preflight 가 실제로 막는지. 이슈의 핵심이다."""
+    import calltree.preflight as preflight_module
+
+    problems = preflight_module._smoke_problems(["-nobuiltininc"])
+
+    assert problems, "빌트인 헤더가 없는 파서를 통과시키면 콜트리가 조용히 잘린다"
+    joined = "\n".join(problems)
+    assert "콜 엣지가 기대와 다르다" in joined  # 기존 검사가 그대로 잡는다
+    assert "리소스 디렉터리" in joined  # 원인을 짚어 준다
+
+
 # ------------------------------------------------------------------ CLI 순서
 
 

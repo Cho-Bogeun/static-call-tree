@@ -29,12 +29,7 @@ _BINDING_DISTRIBUTIONS = ("libclang", "clang")
 INSTALL_HELP = f"""\
 설치 방법
 ─────────
-[1] PyPI 휠 하나로 끝내기 (권장. 바인딩과 .so 가 한 벌로 온다)
-
-      pip uninstall -y clang            # 두 패키지는 같은 clang/ 을 덮어쓴다
-      pip install 'libclang==18.1.1'
-
-[2] 시스템 clang 사용
+[1] 시스템 clang 사용 (권장)
 
       apt install libclang-18-dev       # Debian/Ubuntu
       dnf install clang-devel           # Fedora/RHEL
@@ -48,6 +43,17 @@ INSTALL_HELP = f"""\
     바인딩 메이저 버전을 .so 에 맞춘다 (libclang-18 이면 clang 18.x):
 
       pip uninstall -y libclang && pip install 'clang==18.1.8'
+
+[2] PyPI 휠 (시스템에 clang 을 깔 수 없을 때만)
+
+      pip uninstall -y clang            # 두 패키지는 같은 clang/ 을 덮어쓴다
+      pip install 'libclang==18.1.1'
+
+    이 휠은 .so 만 담고 clang 리소스 디렉터리(빌트인 헤더)를 담지 않는다. 그대로
+    쓰면 stddef.h 를 못 찾고, 에러 복구가 호출식을 AST 에서 지워 **콜트리가 조용히
+    잘린다.** 리소스 디렉터리를 따로 갖고 있다면 컴파일 인자로 지정해라:
+
+      -resource-dir=/usr/lib/llvm-18/lib/clang/18
 
 확인:  cstat doctor"""
 
