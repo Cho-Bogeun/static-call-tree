@@ -68,7 +68,8 @@ def test_extract_writes_schema_shaped_json(compile_commands_file: Path, tmp_path
     assert data["meta"]["entry_point"] == "c:@F@process_frame"
     assert data["meta"]["tu_count"] == 3
     assert data["meta"]["compile_commands"] == str(compile_commands_file)
-    assert data["meta"]["clang_version"]
+    # "unknown" 도 truthy 라 그냥 두면 버전을 못 읽는 상태를 통과시킨다.
+    assert "clang version" in data["meta"]["clang_version"]
     assert "c:proc.c@F@reset" in data["nodes"]
     assert "c:@g_cfg" in data["state"]
     # USR 정렬로 스냅샷 diff 가 안정적이어야 한다.

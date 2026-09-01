@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
 from importlib import metadata
 from pathlib import Path
 from types import ModuleType
@@ -121,16 +122,37 @@ def clang_version() -> str:
 
     `clang_getClangVersion` 은 바인딩에 등록돼 있지 않아 반환값이 정수로 잘린다.
     restype 을 직접 지정해 호출한다.
+
+    `from_result` 를 ctypes 의 `errcheck` 으로 걸지 않는다. errcheck 규약은 콜러블을
+    3인자(`result, func, arguments`)로 부르는데, clang 21.x 바인딩에서 이것이
+    **1인자 `@staticmethod` 로 바뀌었다.** 걸어 두면 `TypeError` 가 나고 아래 except
+    가 그걸 삼켜 "unknown" 이 되며, 그러면 `_check_versions` 의 메이저 대조가 통째로
+    꺼진다 — 방어 코드가 있으나 없으나 같아진다. 직접 부르면 1인자라 두 바인딩에서
+    다 맞는다 (18.x 는 나머지 인자가 기본값이다).
+
+    `_CXString.__del__` 이 `clang_disposeString` 을 부르므로, 반환된 CXString 을
+    임시로 두고 `clang_getCString` 만 인라인하면 해제된 버퍼를 읽는다.
+    `from_result(res)` 는 `res` 를 파라미터로 붙들고 있어 그 함정을 피한다.
     """
     cindex = configure()
     try:
         function = cindex.conf.lib.clang_getClangVersion
         function.restype = cindex._CXString
-        function.errcheck = cindex._CXString.from_result
-        version = function()
-    except Exception:  # pragma: no cover - 바인딩 내부 사정
+        function.argtypes = []
+        version = cindex._CXString.from_result(function())
+    except Exception as exc:  # pragma: no cover - 바인딩 내부 사정
+        # 여기로 떨어지면 메이저 대조가 통째로 꺼진다. 조용히 넘어가면 꺼졌다는
+        # 사실 자체가 안 보이므로, 다음 바인딩 변경 때 같은 일이 반복된다.
+        warnings.warn(
+            f"네이티브 libclang 버전을 읽지 못했다 ({type(exc).__name__}: {exc}). "
+            "바인딩/네이티브 메이저 대조를 건너뛴다.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return "unknown"
-    return str(version) if version else "unknown"
+    if isinstance(version, bytes):  # 바인딩에 따라 디코드까지 안 해 준다
+        version = version.decode("utf-8", "replace")
+    return version or "unknown"
 
 
 def binding_version(cindex: ModuleType | None = None) -> tuple[str, str] | None:
@@ -162,6 +184,17 @@ def _major(version: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _native_major(version: str) -> int | None:
+    """네이티브 버전 문자열에서 메이저를 뽑는다.
+
+    배포판이 접두를 붙인다 — `Ubuntu clang version 21.1.8 (...)`. 첫 정수를 집으면
+    접두에 숫자가 있는 배포판(`Ubuntu 24.04 clang version ...`)에서 엉뚱한 값을
+    집으므로 `clang version` 뒤를 본다.
+    """
+    match = re.search(r"clang version (\d+)", version)
+    return int(match.group(1)) if match else _major(version)
+
+
 def _check_versions(cindex: ModuleType) -> None:
     if os.environ.get(ENV_ALLOW_MISMATCH):
         return
@@ -183,7 +216,7 @@ def _check_versions(cindex: ModuleType) -> None:
         return
 
     binding_major = _major(binding[1])
-    native_major = _major(native.replace("clang version", "").strip())
+    native_major = _native_major(native)
     if binding_major is None or native_major is None:
         return
 

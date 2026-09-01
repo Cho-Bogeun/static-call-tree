@@ -165,6 +165,12 @@ pip install -e ".[bundled-libclang]"
 취향이 아니라 관문이다. 빌트인 헤더가 없는 파서에서는 이 호출식이 통째로 사라지므로,
 **콜 엣지 검사 하나가 곧 빌트인 헤더 검사**가 된다. 새 검사를 붙일 필요가 없었다.
 
+메이저 버전 대조는 네이티브 버전 문자열을 읽어야 성립한다. 못 읽으면 대조를 건너뛰고
+**관문이 통째로 꺼지므로**, 못 읽었다는 사실을 `RuntimeWarning` 으로 남긴다. 읽는 쪽은
+`clang_getClangVersion` 의 결과를 `_CXString.from_result` 로 직접 변환한다 — ctypes 의
+`errcheck` 으로 걸면 clang 21.x 바인딩에서 `TypeError` 가 난다. 그 규약은 콜러블을
+3인자로 부르는데 21.x 의 `from_result` 는 1인자이기 때문이다.
+
 메이저 버전 대조만 무시하려면 `CALLTREE_ALLOW_VERSION_MISMATCH=1` 이 있지만, 조용히
 틀린 결과를 받게 되므로 권하지 않는다. 스모크 파싱 실패는 무시할 수 없다.
 
