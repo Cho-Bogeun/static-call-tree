@@ -57,9 +57,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--validate", action="store_true", help="출력을 스키마로 검증한다"
     )
     parser.add_argument(
+        "--allow-parse-errors",
+        action="store_true",
+        help="파싱 에러가 있어도 종료 코드 0 으로 끝낸다 (기본은 실패)",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
-        help="파싱 에러가 하나라도 있으면 실패로 처리한다",
+        help="(옛 이름) 지금은 기본 동작이라 아무 효과가 없다",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="진행 로그 숨김")
 
@@ -122,7 +127,17 @@ def run(args: argparse.Namespace) -> int:
 
     for failure in result.failed:
         print(f"파싱 실패: {failure}", file=sys.stderr)
-    if result.diagnostics and not args.quiet:
+
+    # 파싱 에러는 "덜 뽑혔다"가 아니라 "틀리게 뽑혔다"다. clang 의 에러 복구는 해석에
+    # 실패한 식별자를 인자로 쓰는 **호출식을 AST 에서 통째로 지우므로**, 진단이 있는
+    # 콜트리는 엣지가 조용히 빠져 있다. 그 위에 세운 오염도와 "깨끗한 서브트리" 는
+    # 볼 가치가 없으니 기본을 실패로 둔다.
+    parse_errors_are_fatal = bool(result.diagnostics or result.failed) and not (
+        args.allow_parse_errors
+    )
+    # 실패로 끝낼 참이면 -q 여도 이유는 보여준다. -q 는 진행 로그를 줄이는 것이지
+    # 실패 사유를 감추는 것이 아니다.
+    if result.diagnostics and (not args.quiet or parse_errors_are_fatal):
         print(
             f"파싱 에러 진단 {len(result.diagnostics)}건 (앞 10건):", file=sys.stderr
         )
@@ -154,8 +169,14 @@ def run(args: argparse.Namespace) -> int:
         if errors:
             exit_code = 1
 
-    if args.strict and (result.diagnostics or result.failed):
-        print("--strict: 파싱 에러가 있어 실패로 처리한다", file=sys.stderr)
+    if parse_errors_are_fatal:
+        print(
+            "파싱 에러가 있어 실패로 처리한다. 에러 복구가 호출식을 지우므로 이 "
+            "콜트리는 엣지가 빠져 있다. 헤더 경로부터 확인해라 "
+            "(빌트인 헤더가 없으면 stddef.h 를 못 찾는다). "
+            "그래도 내보내려면 --allow-parse-errors 를 준다.",
+            file=sys.stderr,
+        )
         exit_code = 1
 
     text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,11 +24,24 @@ from calltree.libclang_loader import (
 SMOKE_NAME = "calltree_preflight.c"
 
 #: 추출기가 의존하는 관측을 한 번에 건드리는 최소 코드.
-#: static 전역, 함수 내 static, 해석되는 호출, 정의 없는 리프, 토큰 기반 연산자 판정.
+#: static 전역, 함수 내 static, 해석되는 호출, 정의 없는 리프, 토큰 기반 연산자 판정,
+#: 그리고 빌트인 헤더가 실제로 닿는지.
+#:
+#: `#include <stddef.h>` 는 취향이 아니라 관문이다. PyPI `libclang` 휠처럼 clang
+#: 리소스 디렉터리(빌트인 헤더)가 없는 파서에서는 `stddef.h` 를 못 찾고, 그러면
+#: `NULL` 이 미정의 식별자가 된다. 이때 clang 의 에러 복구는 **그 식별자를 인자로 쓰는
+#: 호출식을 AST 에서 통째로 지운다.** 진단은 "헤더를 못 찾았다"인데 실제로 사라지는
+#: 것은 콜 엣지다. 아래 `smoke_leaf(v, NULL)` 한 줄 덕에 기존 콜 엣지 검사가 곧
+#: "빌트인 헤더가 있는가" 검사가 된다.
+#:
+#: `stddef.h` 는 프리스탠딩 헤더라 libc 유무와 무관하고, `unsaved_files` 로 파싱하므로
+#: 디스크에 파일도 만들지 않는다.
 SMOKE_SOURCE = """\
+#include <stddef.h>
+
 static int s_flag;
 
-int smoke_leaf(int v);
+int smoke_leaf(int v, void *p);
 
 int smoke_entry(int v)
 {
@@ -35,11 +49,14 @@ int smoke_entry(int v)
 
     hits++;
     s_flag = v;
-    return smoke_leaf(v) + hits;
+    return smoke_leaf(v, NULL) + hits;
 }
 """
 
 _EXPECTED_ACCESSES = {("hits", "readwrite"), ("hits", "read"), ("s_flag", "write")}
+
+#: 리소스 디렉터리가 없는 파서에서 나오는 진단. 이게 보이면 원인을 짚어 준다.
+_MISSING_BUILTIN_HEADER = "'stddef.h' file not found"
 
 
 @dataclass
@@ -94,19 +111,31 @@ def run(library_file: str | None = None, library_path: str | None = None) -> Rep
     return report
 
 
-def _smoke_problems() -> list[str]:
+def _smoke_problems(extra_args: Sequence[str] = ()) -> list[str]:
+    """스모크 조각을 훑고 기대와 다른 점을 모은다.
+
+    `extra_args` 는 테스트가 깨진 파서를 흉내 내려고 쓴다(빌트인 헤더를 빼는
+    `-nobuiltininc` 등). 실행 경로에서는 비어 있다.
+    """
     from calltree.extract import TUExtractor  # 순환 임포트 회피
 
     problems: list[str] = []
     extractor = TUExtractor(root=Path.cwd())
     result = extractor.parse(
         SMOKE_NAME,
-        args=["-std=c11"],
+        args=["-std=c11", *extra_args],
         unsaved_files=[(SMOKE_NAME, SMOKE_SOURCE)],
     )
 
     if result.has_errors:
         problems.append(f"스모크 조각 파싱에 에러: {result.diagnostics[:3]}")
+        if any(_MISSING_BUILTIN_HEADER in text for text in result.diagnostics):
+            problems.append(
+                "빌트인 헤더를 못 찾았다 — clang 리소스 디렉터리가 없는 파서다. "
+                "PyPI `libclang` 휠이 대표적이다(.so 만 담고 헤더는 안 담는다). "
+                "이대로 큰 코드베이스를 훑으면 NULL 을 쓰는 호출식이 AST 에서 사라져 "
+                "콜트리가 조용히 잘린다."
+            )
 
     entry = result.nodes.get("c:@F@smoke_entry")
     if entry is None:
