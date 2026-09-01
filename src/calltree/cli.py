@@ -1,9 +1,11 @@
-"""명령줄 인터페이스.
+"""추출 단계의 명령줄 인터페이스.
 
-    calltree extract --compile-commands build/compile_commands.json \
-                     --entry process_frame -o calltree.json
-    calltree analyze calltree.json -o analysis.json
-    calltree validate calltree.json
+    cstat calltree -c build/compile_commands.json -e process_frame -o calltree.json
+    cstat doctor
+
+인자 정의와 실행만 담고 명령 이름은 정하지 않는다. 이름을 붙이고 서브명령으로 다는
+것은 `cstat.cli` 의 몫이다. 판정 쪽은 `analyze.cli` 에 따로 있고, 이 모듈은 그쪽을
+참조하지 않는다.
 """
 
 from __future__ import annotations
@@ -11,108 +13,59 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
-from analyze.contamination import EntryNotFound, analyze
-from analyze.model import Criteria
-from analyze.validation import schema_for, validate_analysis
-from calltree import __version__
 from calltree.compile_db import load_compile_commands
 from calltree.extract import ExtractionResult, extract
 from calltree.libclang_loader import LibclangUnavailable
 from calltree.model import CallTree, Meta
 from calltree.preflight import diagnose, run as preflight
-from calltree.validation import load_schema, validate
+from calltree.validation import validate
 
 #: libclang 문제로 아무 것도 하지 못하고 멈췄을 때의 종료 코드.
 EXIT_LIBCLANG = 2
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="calltree", description="정적 콜트리 추출기 (libclang)"
-    )
-    parser.add_argument("--version", action="version", version=f"calltree {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    extract_cmd = sub.add_parser("extract", help="compile_commands.json 으로 콜트리 추출")
-    extract_cmd.add_argument(
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """추출 인자."""
+    parser.add_argument(
         "-c",
         "--compile-commands",
         required=True,
         help="compile_commands.json 경로",
     )
-    extract_cmd.add_argument(
+    parser.add_argument(
         "-e",
         "--entry",
         required=True,
         help="진입점. 함수 이름 또는 USR(c: 로 시작)",
     )
-    extract_cmd.add_argument(
-        "-o", "--output", help="출력 파일. 생략하면 표준출력"
-    )
-    extract_cmd.add_argument(
+    parser.add_argument("-o", "--output", help="출력 파일. 생략하면 표준출력")
+    parser.add_argument(
         "--root",
         default=".",
         help="loc.file 을 상대경로로 만들 기준 디렉터리 (기본: 현재 디렉터리)",
     )
-    extract_cmd.add_argument(
+    parser.add_argument(
         "--include-system",
         action="store_true",
         help="시스템 헤더의 선언도 노드로 기록한다",
     )
-    extract_cmd.add_argument("--libclang", help="libclang 공유 라이브러리 경로")
-    extract_cmd.add_argument(
+    parser.add_argument("--libclang", help="libclang 공유 라이브러리 경로")
+    parser.add_argument(
         "--validate", action="store_true", help="출력을 스키마로 검증한다"
     )
-    extract_cmd.add_argument(
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="파싱 에러가 하나라도 있으면 실패로 처리한다",
     )
-    extract_cmd.add_argument("-q", "--quiet", action="store_true", help="진행 로그 숨김")
+    parser.add_argument("-q", "--quiet", action="store_true", help="진행 로그 숨김")
 
-    analyze_cmd = sub.add_parser("analyze", help="콜트리를 오염 판정한다 (libclang 불필요)")
-    analyze_cmd.add_argument("file", help="calltree.json 경로")
-    analyze_cmd.add_argument("-o", "--output", help="출력 파일. 생략하면 표준출력")
-    analyze_cmd.add_argument(
-        "--include-const",
-        action="store_true",
-        help="const 상태 접근도 오염원 근거로 센다 (기본: 제외)",
-    )
-    analyze_cmd.add_argument(
-        "--no-function-static",
-        action="store_true",
-        help="함수 내 static 을 오염원 근거에서 뺀다 (기본: 포함)",
-    )
-    analyze_cmd.add_argument(
-        "--addr-as",
-        choices=["read", "write", "readwrite", "manual"],
-        default="readwrite",
-        help="주소만 취한 접근을 무엇으로 볼지 (기본: readwrite)",
-    )
-    analyze_cmd.add_argument(
-        "--const-read",
-        action="store_true",
-        help="읽기 전용 접근을 상수 취급해 오염원 근거에서 뺀다 (기본: 센다)",
-    )
-    analyze_cmd.add_argument(
-        "--validate", action="store_true", help="출력을 스키마로 검증한다"
-    )
-    analyze_cmd.add_argument("-q", "--quiet", action="store_true", help="요약 숨김")
 
-    validate_cmd = sub.add_parser("validate", help="추출/판정 결과를 스키마로 검증")
-    validate_cmd.add_argument("file", help="calltree.json 또는 analysis.json 경로")
-    validate_cmd.add_argument(
-        "--schema", help="스키마 파일 경로. 생략하면 내용을 보고 고른다"
-    )
-
-    doctor_cmd = sub.add_parser("doctor", help="libclang 이 쓸 만한 상태인지 점검")
-    doctor_cmd.add_argument("--libclang", help="libclang 공유 라이브러리 경로")
-
-    return parser
+def add_doctor_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--libclang", help="libclang 공유 라이브러리 경로")
 
 
 def _resolve_entry(entry: str, result: ExtractionResult) -> str:
@@ -138,7 +91,8 @@ def _resolve_entry(entry: str, result: ExtractionResult) -> str:
     return definitions[0].usr
 
 
-def _run_extract(args: argparse.Namespace) -> int:
+def run(args: argparse.Namespace) -> int:
+    """소스를 훑어 calltree.json 을 만든다."""
     # 무엇보다 먼저 점검한다. libclang 이 조금이라도 어긋나면 파일 하나 읽지 않고 멈춘다.
     try:
         report = preflight(library_file=args.libclang)
@@ -218,58 +172,7 @@ def _run_extract(args: argparse.Namespace) -> int:
     return exit_code
 
 
-def _run_analyze(args: argparse.Namespace) -> int:
-    data = json.loads(Path(args.file).read_text(encoding="utf-8"))
-    tree = CallTree.from_dict(data)
-    criteria = Criteria(
-        exclude_const=not args.include_const,
-        include_function_static=not args.no_function_static,
-        addr_as=args.addr_as,
-        const_read=args.const_read,
-    )
-
-    try:
-        result = analyze(tree, criteria, source=str(args.file))
-    except EntryNotFound as exc:
-        raise SystemExit(str(exc)) from exc
-
-    output = result.analysis.to_dict()
-    exit_code = 0
-
-    if args.validate:
-        errors = validate_analysis(output)
-        for error in errors:
-            print(f"스키마 위반: {error}", file=sys.stderr)
-        if errors:
-            exit_code = 1
-
-    text = json.dumps(output, indent=2, ensure_ascii=False) + "\n"
-    if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
-    else:
-        sys.stdout.write(text)
-
-    if not args.quiet:
-        print(result.summary(tree), file=sys.stderr)
-        if args.output:
-            print(f"\n판정 {len(output['nodes'])}개 -> {args.output}", file=sys.stderr)
-
-    return exit_code
-
-
-def _run_validate(args: argparse.Namespace) -> int:
-    data = json.loads(Path(args.file).read_text(encoding="utf-8"))
-    schema = load_schema(args.schema) if args.schema else schema_for(data)
-    errors = validate(data, schema)
-    if not errors:
-        print("OK", file=sys.stderr)
-        return 0
-    for error in errors:
-        print(f"스키마 위반: {error}", file=sys.stderr)
-    return 1
-
-
-def _run_doctor(args: argparse.Namespace) -> int:
+def run_doctor(args: argparse.Namespace) -> int:
     try:
         report = diagnose(library_file=args.libclang)
     except LibclangUnavailable as exc:
@@ -281,18 +184,3 @@ def _run_doctor(args: argparse.Namespace) -> int:
         return 0
     print("\n이 상태로는 추출을 시작하지 않는다.", file=sys.stderr)
     return EXIT_LIBCLANG
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.command == "extract":
-        return _run_extract(args)
-    if args.command == "analyze":
-        return _run_analyze(args)
-    if args.command == "doctor":
-        return _run_doctor(args)
-    return _run_validate(args)
-
-
-if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())

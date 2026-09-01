@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "calltree"
+name = "cstat"
 version = "0.1.0"
-description = "libclang + compile_commands.json 으로 레거시 C 코드베이스의 정적 콜트리를 추출한다"
+description = "레거시 C 코드베이스의 정적 콜트리를 뽑고(libclang) 숨은 상태로 인한 오염을 판정한다"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -19,7 +19,7 @@ validate = ["jsonschema>=4"]
 dev = ["jsonschema>=4", "pytest>=7"]
 
 [project.scripts]
-calltree = "calltree.cli:main"
+cstat = "cstat.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

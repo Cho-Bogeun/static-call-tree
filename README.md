@@ -1,11 +1,11 @@
-# calltree
+# cstat
 
 두 문서의 구현. 추출은 `calltree-extraction-schema.md`, 판정은
 `contamination-analysis.md` 다.
 
 ```
-소스코드 ──libclang──> calltree.json ──분석──> analysis.json
-                        (사실)                  (판단)
+소스코드 ──cstat calltree──> calltree.json ──cstat analyze──> analysis.json
+                              (사실)                            (판단)
 ```
 
 **추출**은 libclang 으로 `compile_commands.json` 의 각 TU 를 훑어 **콜 엣지와 상태
@@ -34,11 +34,14 @@
 │   │   ├── extract.py              AST 순회: 콜 엣지 + 상태 접근
 │   │   ├── merge.py                USR 병합 (정의가 선언을 덮어쓴다)
 │   │   ├── validation.py           calltree.schema.json 검증
-│   │   └── cli.py                  calltree extract / analyze / validate / doctor
-│   └── analyze/                    판정 — libclang 도 소스도 보지 않는다
-│       ├── model.py                analysis.schema.json 에 1:1 대응
-│       ├── contamination.py        가지치기 → 오염원 → 오염도 → 경계
-│       └── validation.py           analysis.schema.json 검증
+│   │   └── cli.py                  추출 인자 + 실행
+│   ├── analyze/                    판정 — libclang 도 소스도 보지 않는다
+│   │   ├── model.py                analysis.schema.json 에 1:1 대응
+│   │   ├── contamination.py        가지치기 → 오염원 → 오염도 → 경계
+│   │   ├── validation.py           analysis.schema.json 검증
+│   │   └── cli.py                  판정 인자 + 실행
+│   └── cstat/
+│       └── cli.py                  cstat calltree / analyze / validate / doctor
 └── tests/
     ├── conftest.py
     ├── fixtures/proj/              실제로 파싱하는 C 픽스처 프로젝트
@@ -59,14 +62,19 @@
 추출기는 영향을 받지 않는다. 두 스키마가 같은 규칙으로 놓이므로 스키마 탐색기
 (`calltree.validation.find_schema_file`)만 공유한다.
 
-명령줄은 `calltree` 하나로 남겼다. `calltree analyze` 는 `analyze` 패키지를 부르는
-얇은 껍데기다.
+**CLI 도 같은 모양으로 갈라 두었다.** `calltree.cli` 와 `analyze.cli` 는 각자 인자
+정의(`add_arguments`)와 실행(`run`)만 내놓고 명령 이름은 정하지 않는다. 이름을 붙여
+하나의 파서로 조립하는 것은 `cstat.cli` 의 몫이다. 두 패키지가 서로를 모르는 상태가
+유지되고, 의존은 조립하는 쪽으로만 모인다.
+
+`validate` 가 `cstat` 에 있는 이유도 같다. 두 스키마를 다 아는 곳이 거기뿐이고,
+`calltree` 도 `analyze` 도 상대의 스키마를 알 필요가 없다.
 
 ## 설치
 
 ```bash
 pip install -e ".[dev]"
-calltree doctor          # libclang 이 실제로 쓸 만한지 확인
+cstat doctor          # libclang 이 실제로 쓸 만한지 확인
 ```
 
 `doctor` 가 이렇게 나오면 준비된 것이다.
@@ -114,7 +122,7 @@ pip uninstall -y libclang && pip install 'clang==18.1.8'   # .so 의 메이저�
 | 바인딩이 `.so` 보다 구형 | **조용히 로드됨.** 새 커서 종류를 놓쳐 틀린 콜트리가 나온다 | 메이저 버전 대조로 잡고 멈춘다 |
 | `clang` 과 `libclang` 이 둘 다 설치됨 | 나중에 설치된 쪽이 덮어써서 무엇이 사는지 불명 | 잡고 멈춘다 |
 
-그래서 `extract` 는 **compile_commands.json 을 열기 전에** 점검부터 한다. 로딩과 버전
+그래서 `cstat calltree` 는 **compile_commands.json 을 열기 전에** 점검부터 한다. 로딩과 버전
 대조에 더해, 작은 C 조각을 실제로 훑어서 콜 엣지·접근 방향·`function_static` 소유자
 같은 우리가 의존하는 관측이 그대로 나오는지 본다(`src/calltree/preflight.py`).
 하나라도 어긋나면 아무 것도 추출하지 않고 종료 코드 2 로 멈춘다.
@@ -129,7 +137,7 @@ pip uninstall -y libclang && pip install 'clang==18.1.8'   # .so 의 메이저�
 cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -B build      # 또는: bear -- make
 
 # 2. 추출
-calltree extract \
+cstat calltree \
     --compile-commands build/compile_commands.json \
     --entry process_frame \
     --root . \
@@ -137,17 +145,17 @@ calltree extract \
     --validate
 
 # 3. 판정 (libclang 이 필요 없다)
-calltree analyze calltree.json --output analysis.json --validate
+cstat analyze calltree.json --output analysis.json --validate
 
 # 4. 나중에 따로 검증 — 내용을 보고 스키마를 고른다
-calltree validate calltree.json
-calltree validate analysis.json
+cstat validate calltree.json
+cstat validate analysis.json
 ```
 
 종료 코드: `0` 성공, `1` 스키마 위반이나 `--strict` 실패, `2` libclang 문제로 아무
 것도 하지 못함.
 
-`extract` 의 옵션:
+`cstat calltree` 의 옵션:
 
 | 옵션 | 설명 |
 |---|---|
@@ -157,7 +165,7 @@ calltree validate analysis.json
 | `--strict` | 파싱 에러가 하나라도 있으면 종료 코드 1 |
 | `--libclang` | libclang 공유 라이브러리 경로 |
 
-`calltree doctor` 는 점검만 하고 결과를 보여준다. `--libclang` 을 같이 줄 수 있다.
+`cstat doctor` 는 점검만 하고 결과를 보여준다. `--libclang` 을 같이 줄 수 있다.
 
 파이썬에서 직접 쓸 수도 있다.
 
@@ -173,14 +181,14 @@ print([(use.target, use.access) for use in node.state_uses])
 
 ## 분석
 
-`analyze` 는 `calltree.json` 하나만 읽는다. 진입점은 `meta.entry_point` 를 쓰므로
+`cstat analyze` 는 `calltree.json` 하나만 읽는다. 진입점은 `meta.entry_point` 를 쓰므로
 따로 주지 않는다. 기준별로 여러 벌 만들어 비교하는 것이 이 단계의 목적이다.
 
 ```bash
-calltree analyze calltree.json -o strict.json                       # 권장 기본값
-calltree analyze calltree.json -o globals-only.json --no-function-static
-calltree analyze calltree.json -o optimistic.json --const-read --addr-as read
-calltree analyze calltree.json -o suspicious.json --include-const --addr-as manual
+cstat analyze calltree.json -o strict.json                       # 권장 기본값
+cstat analyze calltree.json -o globals-only.json --no-function-static
+cstat analyze calltree.json -o optimistic.json --const-read --addr-as read
+cstat analyze calltree.json -o suspicious.json --include-const --addr-as manual
 ```
 
 | 옵션 | 기본 | 설명 |
@@ -200,10 +208,10 @@ calltree analyze calltree.json -o suspicious.json --include-const --addr-as manu
 가 같은 결과를 낸다(`manual` 만 확인 목록이 따로 붙는다).
 
 ```console
-$ calltree analyze calltree.json --const-read --addr-as read      # 낙관적
+$ cstat analyze calltree.json --const-read --addr-as read      # 낙관적
      1  process_frame        g_flag, retry_cnt
 
-$ calltree analyze calltree.json --const-read --addr-as readwrite  # 보수적
+$ cstat analyze calltree.json --const-read --addr-as readwrite  # 보수적
      1  process_frame        g_flag, retry_cnt, g_buf
 ```
 
@@ -215,7 +223,7 @@ $ calltree analyze calltree.json --const-read --addr-as readwrite  # 보수적
 `--quiet` 가 아니면 표준에러로 요약이 나온다. 참조 문서 §7 의 읽는 순서 그대로다.
 
 ```console
-$ calltree analyze calltree.json -o analysis.json
+$ cstat analyze calltree.json -o analysis.json
 진입점   : process_frame
 도달 노드: 6개 (전체 9개 중)
 기준     : exclude_const=true include_function_static=true addr_as=readwrite const_read=false
