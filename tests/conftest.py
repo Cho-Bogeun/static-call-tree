@@ -7,6 +7,7 @@ import pytest
 
 from calltree.compile_db import CompileCommand
 from calltree.libclang_loader import LibclangUnavailable
+from calltree.model import CallTree, Meta
 from calltree.preflight import run as preflight
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "proj"
@@ -53,6 +54,29 @@ def fixture_root() -> Path:
 @pytest.fixture
 def commands() -> list[CompileCommand]:
     return make_commands()
+
+
+@pytest.fixture(scope="session")
+def extracted_tree() -> CallTree:
+    """픽스처 프로젝트를 한 번만 파싱해 콜트리로 만든다.
+
+    파싱은 이 테스트 묶음에서 제일 비싼 일이고, 판정 쪽 테스트는 전부 같은 결과를
+    입력으로 쓴다. 읽기 전용으로만 다뤄야 한다.
+    """
+    from calltree.extract import extract
+
+    result = extract(make_commands(), root=FIXTURE_ROOT)
+    return CallTree(
+        meta=Meta(
+            entry_point="c:@F@process_frame",
+            compile_commands="build/compile_commands.json",
+            clang_version="18.1.1",
+            generated_at="2026-08-31T10:00:00+09:00",
+            tu_count=3,
+        ),
+        nodes=result.nodes,
+        state=result.state,
+    )
 
 
 @pytest.fixture

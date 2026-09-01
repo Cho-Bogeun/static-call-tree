@@ -21,16 +21,8 @@ from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from calltree.model import (
-    Access,
-    Analysis,
-    CallTree,
-    Criteria,
-    FunctionNode,
-    StateUse,
-    StateVar,
-    Verdict,
-)
+from analyze.model import Analysis, Criteria, Verdict
+from calltree.model import Access, CallTree, FunctionNode, StateUse, StateVar
 
 
 class EntryNotFound(KeyError):

@@ -26,16 +26,19 @@
 ├── analysis.schema.json            판정 계약 (원본)
 ├── pyproject.toml
 ├── src/
-│   └── calltree/
-│       ├── model.py                두 스키마에 1:1 대응하는 데이터 모델
-│       ├── compile_db.py           compile_commands.json 읽기 + 드라이버 플래그 제거
-│       ├── libclang_loader.py      libclang 로딩 + 버전 대조
-│       ├── preflight.py            실행 전 점검 (스모크 파싱)
-│       ├── extract.py              AST 순회: 콜 엣지 + 상태 접근
-│       ├── merge.py                USR 병합 (정의가 선언을 덮어쓴다)
-│       ├── analysis.py             가지치기 → 오염원 → 오염도 → 경계
-│       ├── validation.py           두 스키마 검증
-│       └── cli.py                  calltree extract / analyze / validate / doctor
+│   ├── calltree/                   추출 — 사실만 기록한다
+│   │   ├── model.py                calltree.schema.json 에 1:1 대응
+│   │   ├── compile_db.py           compile_commands.json 읽기 + 드라이버 플래그 제거
+│   │   ├── libclang_loader.py      libclang 로딩 + 버전 대조
+│   │   ├── preflight.py            실행 전 점검 (스모크 파싱)
+│   │   ├── extract.py              AST 순회: 콜 엣지 + 상태 접근
+│   │   ├── merge.py                USR 병합 (정의가 선언을 덮어쓴다)
+│   │   ├── validation.py           calltree.schema.json 검증
+│   │   └── cli.py                  calltree extract / analyze / validate / doctor
+│   └── analyze/                    판정 — libclang 도 소스도 보지 않는다
+│       ├── model.py                analysis.schema.json 에 1:1 대응
+│       ├── contamination.py        가지치기 → 오염원 → 오염도 → 경계
+│       └── validation.py           analysis.schema.json 검증
 └── tests/
     ├── conftest.py
     ├── fixtures/proj/              실제로 파싱하는 C 픽스처 프로젝트
@@ -43,11 +46,21 @@
     ├── test_compile_db.py
     ├── test_merge.py
     ├── test_extract.py             libclang 으로 실제 파싱해 사실을 검증
-    ├── test_analysis.py            판정 논리 (libclang 없이 도는 부분)
     ├── test_validation.py
     ├── test_preflight.py           어긋난 libclang 에서 멈추는지 확인
+    ├── test_analysis_model.py
+    ├── test_contamination.py       판정 논리 (libclang 없이 도는 부분)
+    ├── test_analysis_validation.py
     └── test_cli.py
 ```
+
+패키지가 갈린 것은 단계가 갈린 것과 같은 이유다. **의존은 한 방향이다** —
+`analyze` 가 `calltree.model` 을 읽고, 그 반대는 없다. 판정 쪽을 아무리 고쳐도
+추출기는 영향을 받지 않는다. 두 스키마가 같은 규칙으로 놓이므로 스키마 탐색기
+(`calltree.validation.find_schema_file`)만 공유한다.
+
+명령줄은 `calltree` 하나로 남겼다. `calltree analyze` 는 `analyze` 패키지를 부르는
+얇은 껍데기다.
 
 ## 설치
 
@@ -233,8 +246,8 @@ $ calltree analyze calltree.json -o analysis.json
 import json
 from pathlib import Path
 
-from calltree.analysis import analyze
-from calltree.model import CallTree, Criteria
+from analyze import Criteria, analyze
+from calltree.model import CallTree
 
 tree = CallTree.from_dict(json.loads(Path("calltree.json").read_text()))
 result = analyze(tree, Criteria(include_function_static=False))
@@ -307,7 +320,7 @@ pytest
 함수가 뭉치지 않는지, 헤더의 `static inline` 이 TU 마다 중복되지 않는지, 접근
 방향이 문맥대로 나오는지, 출력이 스키마를 만족하는지를 본다.
 
-판정 논리는 손으로 만든 작은 콜트리로 따로 본다(`tests/test_analysis.py`). 다이아몬드
+판정 논리는 손으로 만든 작은 콜트리로 따로 본다(`tests/test_contamination.py`). 다이아몬드
 에서 조상을 한 번만 세는지, 상호재귀에서 멈추는지, 리프가 아니라 깨끗한 영역의 가장
 위쪽이 경계로 잡히는지처럼 픽스처 하나로는 짚기 어려운 경계 사례들이다.
 

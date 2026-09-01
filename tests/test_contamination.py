@@ -11,14 +11,11 @@ from collections.abc import Iterable, Mapping
 
 import pytest
 
-from calltree.analysis import EntryNotFound, analyze, reachable_from
-from calltree.extract import extract
+from analyze.contamination import EntryNotFound, analyze, reachable_from
+from analyze.model import ANALYSIS_SCHEMA_VERSION, Analysis, Criteria
 from calltree.model import (
-    ANALYSIS_SCHEMA_VERSION,
-    Analysis,
     Call,
     CallTree,
-    Criteria,
     FunctionNode,
     Loc,
     Meta,
@@ -26,7 +23,6 @@ from calltree.model import (
     StateVar,
     UnresolvedCall,
 )
-from conftest import FIXTURE_ROOT, make_commands
 
 LOC = Loc(file="t.c", line=1)
 
@@ -494,19 +490,8 @@ def test_verdict_round_trips():
 
 
 @pytest.fixture(scope="module")
-def fixture_tree() -> CallTree:
-    result = extract(make_commands(), root=FIXTURE_ROOT)
-    return CallTree(
-        meta=Meta(
-            entry_point="c:@F@process_frame",
-            compile_commands="build/compile_commands.json",
-            clang_version="18.1.1",
-            generated_at="2026-08-31T10:00:00+09:00",
-            tu_count=3,
-        ),
-        nodes=result.nodes,
-        state=result.state,
-    )
+def fixture_tree(extracted_tree: CallTree) -> CallTree:
+    return extracted_tree
 
 
 def test_fixture_analysis(fixture_tree: CallTree):
@@ -572,10 +557,3 @@ def test_fixture_summary_mentions_the_priorities(fixture_tree: CallTree):
     assert "process_frame" in summary
     assert "exclude_const=true" in summary
     assert "clamp" in summary
-
-
-def test_fixture_analysis_validates(fixture_tree: CallTree):
-    pytest.importorskip("jsonschema")
-    from calltree.validation import validate_analysis
-
-    assert validate_analysis(analyze(fixture_tree).analysis.to_dict()) == []

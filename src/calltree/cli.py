@@ -15,14 +15,16 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
+from analyze.contamination import EntryNotFound, analyze
+from analyze.model import Criteria
+from analyze.validation import schema_for, validate_analysis
 from calltree import __version__
-from calltree.analysis import EntryNotFound, analyze
 from calltree.compile_db import load_compile_commands
 from calltree.extract import ExtractionResult, extract
 from calltree.libclang_loader import LibclangUnavailable
-from calltree.model import CallTree, Criteria, Meta
+from calltree.model import CallTree, Meta
 from calltree.preflight import diagnose, run as preflight
-from calltree.validation import load_schema, schema_for, validate, validate_analysis
+from calltree.validation import load_schema, validate
 
 #: libclang 문제로 아무 것도 하지 못하고 멈췄을 때의 종료 코드.
 EXIT_LIBCLANG = 2
